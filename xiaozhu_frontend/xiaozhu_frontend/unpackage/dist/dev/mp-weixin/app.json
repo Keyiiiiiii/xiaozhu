@@ -1,0 +1,61 @@
+{
+  "pages": [
+    "pages/workbench/index",
+    "pages/knowledge/index",
+    "pages/visit/index",
+    "pages/todo/index",
+    "pages/mine/index"
+  ],
+  "window": {
+    "pageOrientation": "portrait",
+    "navigationBarTitleText": "榕小助",
+    "navigationBarTextStyle": "black",
+    "navigationBarBackgroundColor": "#FFFFFF",
+    "backgroundColor": "#F8F8F8",
+    "navigationStyle": "custom"
+  },
+  "tabBar": {
+    "color": "#7A7E83",
+    "selectedColor": "#0085D0",
+    "borderStyle": "black",
+    "backgroundColor": "#FFFFFF",
+    "list": [
+      {
+        "pagePath": "pages/workbench/index",
+        "text": "工作台",
+        "iconPath": "static/tabbar/workbench.svg",
+        "selectedIconPath": "static/tabbar/workbench_active.svg"
+      },
+      {
+        "pagePath": "pages/knowledge/index",
+        "text": "知识库",
+        "iconPath": "static/tabbar/knowledge.svg",
+        "selectedIconPath": "static/tabbar/knowledge_active.svg"
+      },
+      {
+        "pagePath": "pages/visit/index",
+        "text": "走访",
+        "iconPath": "static/tabbar/visit.svg",
+        "selectedIconPath": "static/tabbar/visit_active.svg"
+      },
+      {
+        "pagePath": "pages/todo/index",
+        "text": "待办",
+        "iconPath": "static/tabbar/todo.svg",
+        "selectedIconPath": "static/tabbar/todo_active.svg"
+      },
+      {
+        "pagePath": "pages/mine/index",
+        "text": "我的",
+        "iconPath": "static/tabbar/mine.svg",
+        "selectedIconPath": "static/tabbar/mine_active.svg"
+      }
+    ]
+  },
+  "permission": {
+    "scope.userLocation": {
+      "desc": "演示定位能力"
+    }
+  },
+  "usingComponents": {}
+}

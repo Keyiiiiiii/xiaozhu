@@ -1,0 +1,249 @@
+.container.data-v-72a20504 {
+  min-height: 100vh;
+  background-color: #F4F6F9;
+  display: flex;
+  flex-direction: column;
+  padding-top: var(--status-bar-height);
+  padding-bottom: 50px;
+  box-sizing: border-box;
+}
+
+/* 录音主面板 */
+.record-panel.data-v-72a20504 {
+  background-color: #FFFFFF;
+  padding: 40px 20px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  border-bottom-left-radius: 24px;
+  border-bottom-right-radius: 24px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.03);
+  z-index: 10;
+}
+.record-header.data-v-72a20504 {
+  text-align: center;
+  margin-bottom: 48px;
+}
+.record-title.data-v-72a20504 {
+  font-size: 22px;
+  font-weight: 600;
+  color: #222222;
+  display: block;
+  margin-bottom: 10px;
+}
+.record-desc.data-v-72a20504 {
+  font-size: 14px;
+  color: #888888;
+  letter-spacing: 0.5px;
+}
+.record-action.data-v-72a20504 {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+/* 录音按钮水波纹与阴影质感 */
+.record-btn-outer.data-v-72a20504 {
+  width: 110px;
+  height: 110px;
+  border-radius: 50%;
+  background-color: #E6F4FF;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  margin-bottom: 24px;
+  position: relative;
+  transition: background-color 0.3s ease;
+}
+/* 录音按钮外框背景色（录音中状态） */
+.recording-outer.data-v-72a20504 {
+  background-color: #FFECEC;
+}
+/* 长按圆形进度条容器：绝对定位在按钮外围 */
+.progress-ring.data-v-72a20504 {
+  position: absolute;
+  top: -10px;
+  left: -10px;
+  width: 130px;
+  height: 130px;
+  z-index: 20;
+  /* 让进度条不响应点击事件，穿透到下方按钮 */
+  pointer-events: none;
+}
+/* SVG 进度条整体旋转 -90度，使进度从顶部开始绘制 */
+.progress-ring-svg.data-v-72a20504 {
+  width: 100%;
+  height: 100%;
+  transform: rotate(-90deg);
+}
+/* 进度条背景轨道 */
+.progress-ring-bg.data-v-72a20504 {
+  stroke: rgba(255, 107, 107, 0.2);
+}
+/* 进度条前景圆弧 */
+.progress-ring-circle.data-v-72a20504 {
+  stroke: #FF6B6B;
+  /* 平滑过渡动画 */
+  transition: stroke-dashoffset 0.05s linear;
+}
+/* 未录音状态水波纹动画 */
+.ripple-effect.data-v-72a20504::before {
+  content: '';
+  position: absolute;
+  top: -10px; right: -10px; bottom: -10px; left: -10px;
+  border-radius: 50%;
+  border: 1px solid rgba(0, 133, 208, 0.2);
+  animation: ripple-72a20504 2s infinite ease-in-out;
+  /* 不响应点击事件，穿透到下方按钮（关键：否则会阻挡点击） */
+  pointer-events: none;
+}
+@keyframes ripple-72a20504 {
+0% { transform: scale(0.8); opacity: 1;
+}
+100% { transform: scale(1.2); opacity: 0;
+}
+}
+.record-btn-inner.data-v-72a20504 {
+  width: 86px;
+  height: 86px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #0099FF 0%, #0077B3 100%);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  box-shadow: 0 8px 20px rgba(0, 133, 208, 0.4);
+}
+.record-btn-text.data-v-72a20504 {
+  color: #FFFFFF;
+  font-size: 18px;
+  font-weight: 600;
+  letter-spacing: 2px;
+}
+/* 录音中计时器文字样式 */
+.record-timer.data-v-72a20504 {
+  color: #FFFFFF;
+  font-size: 20px;
+  font-weight: 600;
+  /* 等宽字体，防止数字跳动 */
+  font-family: 'Courier New', monospace;
+  letter-spacing: 1px;
+}
+/* 录音中按钮内圈样式（红色渐变） */
+.recording-btn.data-v-72a20504 {
+  background: linear-gradient(135deg, #FF6B6B 0%, #EE5A5A 100%) !important;
+  box-shadow: 0 8px 20px rgba(255, 107, 107, 0.4) !important;
+}
+/* 录音中脉冲动画（长按时不显示，避免视觉干扰） */
+.recording-pulse.data-v-72a20504::before {
+  content: '';
+  position: absolute;
+  top: -10px; right: -10px; bottom: -10px; left: -10px;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 107, 107, 0.3);
+  animation: recordingPulse-72a20504 1.5s infinite ease-in-out;
+  /* 不响应点击事件，穿透到下方按钮 */
+  pointer-events: none;
+}
+@keyframes recordingPulse-72a20504 {
+0% { transform: scale(0.9); opacity: 1;
+}
+50% { transform: scale(1.15); opacity: 0.5;
+}
+100% { transform: scale(0.9); opacity: 1;
+}
+}
+.record-status.data-v-72a20504 {
+  font-size: 14px;
+  color: #999999;
+}
+
+/* 历史记录卡片化 */
+.history-panel.data-v-72a20504 {
+  flex: 1;
+  padding: 24px 16px;
+}
+.panel-head.data-v-72a20504 {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+}
+.panel-title.data-v-72a20504 {
+  font-size: 18px;
+  font-weight: 600;
+  color: #222222;
+}
+.panel-filter.data-v-72a20504 {
+  display: flex;
+  align-items: center;
+  background-color: #FFFFFF;
+  padding: 4px 10px;
+  border-radius: 12px;
+  border: 1px solid #EEEEEE;
+}
+.filter-text.data-v-72a20504 {
+  font-size: 13px;
+  color: #666666;
+  margin-right: 4px;
+}
+.filter-icon.data-v-72a20504 {
+  font-size: 10px;
+  color: #999999;
+}
+.history-card.data-v-72a20504 {
+  background-color: #FFFFFF;
+  border-radius: 8px;
+  padding: 16px;
+  margin-bottom: 12px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.02);
+}
+.history-card-head.data-v-72a20504 {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 12px;
+  border-bottom: 1px dashed #F0F0F0;
+  padding-bottom: 12px;
+}
+.history-name.data-v-72a20504 {
+  font-size: 16px;
+  color: #333333;
+  font-weight: 600;
+  flex: 1;
+  margin-right: 12px;
+}
+.history-state.data-v-72a20504 {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  white-space: nowrap;
+}
+.state-done.data-v-72a20504 {
+  background-color: #F6FFED;
+  color: #52C41A;
+}
+.state-processing.data-v-72a20504 {
+  background-color: #FFF7E6;
+  color: #FA8C16;
+}
+.history-card-body.data-v-72a20504 {
+  display: flex;
+  flex-direction: column;
+}
+.meta-row.data-v-72a20504 {
+  display: flex;
+  align-items: center;
+  margin-bottom: 6px;
+}
+.meta-row.data-v-72a20504:last-child {
+  margin-bottom: 0;
+}
+.meta-label.data-v-72a20504 {
+  font-size: 13px;
+  color: #999999;
+  width: 70px;
+}
+.meta-val.data-v-72a20504 {
+  font-size: 13px;
+  color: #444444;
+}
