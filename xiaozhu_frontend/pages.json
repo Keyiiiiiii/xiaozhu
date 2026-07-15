@@ -19,6 +19,12 @@
 			}
 		},
 		{
+			"path": "pages/visit/detail",
+			"style": {
+				"navigationBarTitleText": "走访详情"
+			}
+		},
+		{
 			"path": "pages/todo/index",
 			"style": {
 				"navigationBarTitleText": "待办清单"

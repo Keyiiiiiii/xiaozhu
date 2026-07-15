@@ -88,9 +88,9 @@
         </view>
       </view>
       <view class="history-list">
-        <view class="history-card" v-for="(item, index) in historyList" :key="item.id">
+        <view class="history-card" v-for="(item, index) in historyList" :key="item.id" @click="goToDetail(item.id)">
           <view class="history-card-head">
-            <text class="history-name" @click="openEditNameModal(index)">{{ item.name }}</text>
+            <text class="history-name" @click.stop="openEditNameModal(index)">{{ item.name }}</text>
             <text class="history-state" :class="item.status === 'done' ? 'state-done' : 'state-processing'">
               {{ item.status === 'done' ? '已提取' : '处理中' }}
             </text>
@@ -412,6 +412,7 @@ export default {
     },
     
     handleMessage(data) {
+      console.log("【WebSocket原始数据】:", data);
       let result;
       try {
         result = JSON.parse(data);
@@ -1045,6 +1046,12 @@ export default {
       return `${mins}分${secs}秒`;
     },
     
+    goToDetail(id) {
+      uni.navigateTo({
+        url: `/pages/visit/detail?id=${id}`
+      });
+    },
+
     openEditNameModal(index) {
       if (index >= 0 && index < this.historyList.length) {
         this.editingIndex = index;
