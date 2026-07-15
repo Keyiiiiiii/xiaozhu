@@ -2,6 +2,7 @@ const config = {
   voiceServer: {
     baseUrl: "http://36.134.70.149:9005",
     wsPath: "/api/voice/auth/",
+    //TODO：从后端获取 API Token
     apiToken: "OYECtTTccG1fOzsT6e8EKXR4sOBHJalv"
   },
   visitServer: {
