@@ -38,7 +38,7 @@
         <text class="section-title">快捷操作</text>
       </view>
       <view class="grid-panel">
-        <view class="grid-item">
+        <view class="grid-item" @click="goToVisit">
           <view class="grid-icon bg-blue-light"><text class="icon-text text-blue">录</text></view>
           <text class="grid-text">走访录音</text>
         </view>
@@ -83,6 +83,13 @@
 export default {
   data() {
     return {};
+  },
+  methods: {
+    goToVisit() {
+      uni.switchTab({
+        url: '/pages/visit/index'
+      });
+    }
   }
 };
 </script>

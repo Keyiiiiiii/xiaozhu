@@ -137,6 +137,38 @@
         </view>
       </view>
     </view>
+
+    <!-- 地图选择遮罩层 -->
+    <view class="map-modal" v-if="showMapModal">
+      <view class="map-modal-header">
+        <view class="map-close-btn" @click="closeMapModal">
+          <text class="map-close-text">取消</text>
+        </view>
+        <text class="map-modal-title">选择走访位置</text>
+        <view class="map-confirm-btn" @click="confirmMapLocation">
+          <text class="map-confirm-text">确定</text>
+        </view>
+      </view>
+      <map
+        class="map-container"
+        id="visitMap"
+        ref="visitMap"
+        :longitude="mapLongitude"
+        :latitude="mapLatitude"
+        :scale="mapScale"
+        :show-location="true"
+        :markers="mapMarkers"
+        @tap="onMapTap"
+        @regionchange="onMapRegionChange"
+      />
+      <view class="map-center-marker">
+        <image class="map-marker-icon" src="/static/location.png" mode="aspectFit" />
+      </view>
+      <view class="map-address-bar">
+        <text class="map-address-label">当前位置：</text>
+        <text class="map-address-text">{{ selectedAddress || '正在定位...' }}</text>
+      </view>
+    </view>
   </view>
 </template>
 
@@ -219,6 +251,19 @@ export default {
       showNameModal: false,
       // 当前定位地址
       currentAddress: "",
+      
+      // 地图选择相关
+      showMapModal: false,
+      mapLongitude: 116.397477,
+      mapLatitude: 39.908692,
+      mapScale: 16,
+      mapMarkers: [],
+      selectedAddress: "",
+      selectedLatitude: 0,
+      selectedLongitude: 0,
+      mapContext: null,
+      pendingRecord: null,
+      isNewRecord: false,
     };
   },
   computed: {
@@ -254,6 +299,7 @@ export default {
         this.isRecognizing = false;
         this.hasRecorded = false;
         this.savedAudioPath = "";
+        this.transcriptCollapsed = false;
         
         // 先获取 WebSocket URL
         await this.fetchWebSocketUrl();
@@ -794,20 +840,10 @@ export default {
       // 收起走访记录面板
       this.transcriptCollapsed = true;
       
-      // 获取定位地址
-      let address = "";
-      try {
-        address = await this.getCurrentAddress();
-      } catch (e) {
-        console.warn("获取定位失败:", e);
-        address = "未知位置";
-      }
-      
-      // 生成走访记录
+      // 暂存当前录音数据
       const now = new Date();
-      const record = {
+      this.pendingRecord = {
         id: Date.now().toString(),
-        name: address,
         status: "processing",
         visitTime: this.formatDateTime(now),
         duration: this.recordDuration,
@@ -817,67 +853,177 @@ export default {
         createTime: now.getTime()
       };
       
-      // 插入到历史记录最前面
-      this.historyList.unshift(record);
+      // 打开地图选择位置
+      this.openMapModal();
+    },
+    
+    openMapModal() {
+      this.showMapModal = true;
+      this.selectedAddress = "";
+      this.selectedLatitude = 0;
+      this.selectedLongitude = 0;
       
-      // 保存到本地存储
+      setTimeout(() => {
+        this.mapContext = uni.createMapContext("visitMap", this);
+        this.getCurrentLocation();
+      }, 100);
+    },
+    
+    closeMapModal() {
+      this.showMapModal = false;
+      this.mapContext = null;
+      this.pendingRecord = null;
+      
+      // 取消地图选择，完全收起走访记录面板
+      this.hasRecorded = false;
+      this.recognizedText = "";
+      this.transcriptCollapsed = false;
+      this.textSegments = [];
+      this.savedAudioPath = "";
+      this.recordDuration = 0;
+    },
+    
+    getCurrentLocation() {
+      uni.getLocation({
+        type: 'gcj02',
+        success: (res) => {
+          console.log("定位成功:", res);
+          this.mapLongitude = res.longitude;
+          this.mapLatitude = res.latitude;
+          this.selectedLatitude = res.latitude;
+          this.selectedLongitude = res.longitude;
+          
+          this.updateMapMarker(res.latitude, res.longitude);
+          this.reverseGeocode(res.latitude, res.longitude);
+        },
+        fail: (err) => {
+          console.warn("定位失败:", err);
+          this.selectedAddress = "当前位置";
+          this.selectedLatitude = this.mapLatitude;
+          this.selectedLongitude = this.mapLongitude;
+          this.updateMapMarker(this.mapLatitude, this.mapLongitude);
+          uni.showToast({
+            title: "定位失败，使用默认位置",
+            icon: "none"
+          });
+        }
+      });
+    },
+    
+    updateMapMarker(lat, lng) {
+      this.mapMarkers = [{
+        id: 0,
+        latitude: lat,
+        longitude: lng,
+        iconPath: '/static/location.png',
+        width: 30,
+        height: 30,
+        anchor: {
+          x: 0.5,
+          y: 1
+        }
+      }];
+    },
+    
+    reverseGeocode(lat, lng) {
+      this.selectedLatitude = lat;
+      this.selectedLongitude = lng;
+      
+      // #ifdef APP-PLUS
+      if (window && window.plus) {
+        plus.maps.Map.reverseGeocode({
+          coordinate: {
+            latitude: lat,
+            longitude: lng
+          },
+          success: (res) => {
+            if (res && res.address) {
+              this.selectedAddress = res.address;
+            } else {
+              this.selectedAddress = "当前位置";
+            }
+          },
+          fail: (err) => {
+            console.warn("逆地理编码失败:", err);
+            this.selectedAddress = "当前位置";
+          }
+        });
+      } else {
+        this.selectedAddress = "当前位置";
+      }
+      // #endif
+      
+      // #ifdef H5
+      this.selectedAddress = "当前位置";
+      // #endif
+      
+      // #ifdef MP-WEIXIN
+      this.selectedAddress = "当前位置";
+      // #endif
+    },
+    
+    onMapTap(e) {
+      console.log("点击地图:", e);
+      const { latitude, longitude } = e.detail;
+      this.mapLatitude = latitude;
+      this.mapLongitude = longitude;
+      this.selectedLatitude = latitude;
+      this.selectedLongitude = longitude;
+      this.updateMapMarker(latitude, longitude);
+      this.reverseGeocode(latitude, longitude);
+    },
+    
+    onMapRegionChange(e) {
+      if (e.type === 'end' && e.causedBy === 'drag') {
+        if (this.mapContext) {
+          this.mapContext.getCenterLocation({
+            success: (res) => {
+              this.selectedLatitude = res.latitude;
+              this.selectedLongitude = res.longitude;
+              this.updateMapMarker(res.latitude, res.longitude);
+              this.reverseGeocode(res.latitude, res.longitude);
+            }
+          });
+        }
+      }
+    },
+    
+    confirmMapLocation() {
+      if (!this.pendingRecord) {
+        this.closeMapModal();
+        return;
+      }
+      
+      const address = this.selectedAddress || "未知位置";
+      
+      const record = {
+        ...this.pendingRecord,
+        name: address,
+        latitude: this.selectedLatitude,
+        longitude: this.selectedLongitude
+      };
+      
+      this.historyList.unshift(record);
       this.saveHistoryToStorage();
+      
+      this.showMapModal = false;
+      this.mapContext = null;
+      this.pendingRecord = null;
       
       // 弹出修改名称弹窗
       this.editingIndex = 0;
       this.editingName = address;
+      this.isNewRecord = true;
       this.showNameModal = true;
       
       // TODO: 走访记录上传后端接口待对接
       // 接口地址在 api/config.js 的 visitServer.baseUrl + visitServer.uploadPath
       // 接口定义在 api/visit.js 的 uploadVisitRecord 方法
-      // 后端实现后可取消以下注释启用上传：
-      /*
-      if (this.savedAudioPath) {
-        // #ifdef APP-PLUS
-        try {
-          await uploadVisitRecord(this.savedAudioPath, {
-            name: address,
-            text: this.recognizedText,
-            duration: this.recordDuration.toString()
-          });
-          this.historyList[0].status = 'done';
-          this.saveHistoryToStorage();
-        } catch (e) {
-          console.error("上传失败:", e);
-        }
-        // #endif
-      }
-      */
+      // 上传字段包含：name(走访名称)、text(转写文本)、duration(时长)、latitude(纬度)、longitude(经度)
       
       uni.showToast({
         title: "已保存走访记录",
         icon: "success"
-      });
-    },
-    
-    async getCurrentAddress() {
-      return new Promise((resolve, reject) => {
-        uni.getLocation({
-          type: 'gcj02',
-          geocode: true,
-          success: (res) => {
-            console.log("定位成功:", res);
-            if (res.address && res.address.name) {
-              resolve(res.address.name);
-            } else if (res.address && res.address.street) {
-              resolve(res.address.street);
-            } else if (res.latitude && res.longitude) {
-              resolve(`${res.latitude.toFixed(4)}, ${res.longitude.toFixed(4)}`);
-            } else {
-              resolve("当前位置");
-            }
-          },
-          fail: (err) => {
-            console.warn("定位失败:", err);
-            resolve("当前位置");
-          }
-        });
       });
     },
     
@@ -911,6 +1057,17 @@ export default {
       this.showNameModal = false;
       this.editingIndex = -1;
       this.editingName = "";
+      
+      // 如果是新建记录取消，也完全收起走访记录面板
+      if (this.isNewRecord) {
+        this.hasRecorded = false;
+        this.recognizedText = "";
+        this.transcriptCollapsed = false;
+        this.isNewRecord = false;
+        this.textSegments = [];
+        this.savedAudioPath = "";
+        this.recordDuration = 0;
+      }
     },
     
     confirmEditName() {
@@ -928,6 +1085,17 @@ export default {
       }
       
       this.closeNameModal();
+      
+      // 如果是新建记录，确认名称后完全收起走访记录面板
+      if (this.isNewRecord) {
+        this.hasRecorded = false;
+        this.recognizedText = "";
+        this.transcriptCollapsed = false;
+        this.isNewRecord = false;
+        this.textSegments = [];
+        this.savedAudioPath = "";
+        this.recordDuration = 0;
+      }
     },
     
     saveHistoryToStorage() {
@@ -1338,6 +1506,83 @@ export default {
 }
 .modal-btn-text {
   font-size: 16px;
+}
+
+/* 地图选择弹窗 */
+.map-modal {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: #FFFFFF;
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+}
+.map-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  background-color: #FFFFFF;
+  border-bottom: 1px solid #EEEEEE;
+  padding-top: calc(12px + var(--status-bar-height));
+}
+.map-close-btn,
+.map-confirm-btn {
+  padding: 8px 12px;
+}
+.map-close-text {
+  font-size: 15px;
+  color: #666666;
+}
+.map-confirm-text {
+  font-size: 15px;
+  color: #0099FF;
+  font-weight: 600;
+}
+.map-modal-title {
+  font-size: 17px;
+  font-weight: 600;
+  color: #222222;
+}
+.map-container {
+  flex: 1;
+  width: 100%;
+}
+.map-center-marker {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -100%);
+  pointer-events: none;
+  z-index: 10;
+}
+.map-marker-icon {
+  width: 36px;
+  height: 36px;
+}
+.map-address-bar {
+  position: absolute;
+  left: 16px;
+  right: 16px;
+  bottom: 20px;
+  background-color: #FFFFFF;
+  border-radius: 12px;
+  padding: 14px 16px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1);
+  z-index: 20;
+}
+.map-address-label {
+  font-size: 13px;
+  color: #999999;
+  margin-right: 4px;
+}
+.map-address-text {
+  font-size: 14px;
+  color: #333333;
+  font-weight: 500;
 }
 
 /* 历史记录卡片化 */
