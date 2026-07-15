@@ -178,6 +178,8 @@
       <section class="panel">
         <label for="backendUrl">后端地址</label>
         <input id="backendUrl" value="http://127.0.0.1:9005" spellcheck="false" />
+        <label for="apiToken" style="margin-top:12px;">API Token</label>
+        <input id="apiToken" type="password" placeholder="SV_API_TOKEN" autocomplete="off" spellcheck="false" />
         <div class="buttons">
           <button id="authBtn" class="secondary">获取 WebSocket URL</button>
           <button id="startBtn">开始录音</button>
@@ -214,9 +216,9 @@
     let processor = null;
     let firstFrame = true;
     let segments = [];
-    let cachedWsUrl = "";
 
     const backendUrlInput = document.getElementById("backendUrl");
+    const apiTokenInput = document.getElementById("apiToken");
     const authBtn = document.getElementById("authBtn");
     const startBtn = document.getElementById("startBtn");
     const stopBtn = document.getElementById("stopBtn");
@@ -228,6 +230,12 @@
 
     function backendBase() {
       return backendUrlInput.value.trim().replace(/\/+$/, "");
+    }
+
+    function redactedWebSocketUrl(value) {
+      const parsed = new URL(value);
+      parsed.search = "";
+      return `${parsed.toString()}?ticket=<redacted>`;
     }
 
     function setStatus(value) {
@@ -243,16 +251,23 @@
 
     async function fetchWebSocketUrl() {
       const url = `${backendBase()}/api/voice/auth/`;
+      const token = apiTokenInput.value.trim();
+      if (!token) {
+        throw new Error("请输入 SV_API_TOKEN");
+      }
       log("GET", url);
-      const res = await fetch(url, { method: "GET" });
+      const res = await fetch(url, {
+        method: "GET",
+        headers: { Authorization: `Bearer ${token}` }
+      });
       const json = await res.json();
       if (!res.ok || !json || json.code !== 0 || !json.data || !json.data.url) {
         throw new Error(`获取 WebSocket URL 失败: ${JSON.stringify(json)}`);
       }
-      cachedWsUrl = json.data.url;
-      wsUrlEl.textContent = `WebSocket URL: ${cachedWsUrl}`;
-      log("WebSocket URL", cachedWsUrl);
-      return cachedWsUrl;
+      const displayUrl = redactedWebSocketUrl(json.data.url);
+      wsUrlEl.textContent = `WebSocket URL: ${displayUrl}`;
+      log("WebSocket session", `sid=${json.data.sid} expires_in=${json.data.expires_in}s`);
+      return json.data.url;
     }
 
     function arrayBufferToBase64(buffer) {
@@ -342,7 +357,7 @@
     }
 
     async function openSocket() {
-      const wsUrl = cachedWsUrl || await fetchWebSocketUrl();
+      const wsUrl = await fetchWebSocketUrl();
       socket = new WebSocket(wsUrl);
       await new Promise((resolve, reject) => {
         socket.onopen = resolve;
