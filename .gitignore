@@ -22,6 +22,9 @@ media/
 staticfiles/
 static/
 migrations/
+!migrations/
+!migrations/__init__.py
+!migrations/*.py
 
 # ==================== Node.js / UniApp ====================
 node_modules/
