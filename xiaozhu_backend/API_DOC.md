@@ -1,4 +1,20 @@
-# 小竹后端 API 接口文档
+# 榕小助后端 API 接口文档
+
+### 配置路径 xiaozhu/xiaozhu_backend/xiaozhu_backend/settings.py
+```bash
+# mac 启动流程：
+# 0、安装minio，建立bucket “xiaozhu”
+# 1、终端启动minio服务：
+minio server ~/minio-data --console-address ":9001"
+# 账号密码：minioadmin/minioadmin
+# 2、启动django后端：
+source .venv/bin/activate
+cd /xiaozhu/xiaozhu_backend
+python manage.py runserver
+# 3、请求后端接口：
+curl -X POST -F "file=@test.jpg" http://localhost:8000/api/file/upload/
+curl -X POST http://localhost:8000/api/file/speech-to-text/ -d "file_url=http://localhost:9000/xiaozhu/da16a319bd1949a783be18783b8fbf9f.m4a"
+```
 
 ## 基础信息
 
