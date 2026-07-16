@@ -131,3 +131,7 @@ MINIO_SECURE = False
 MINIO_BUCKET_NAME = "xiaozhu"
 
 AUTH_USER_MODEL = "api.User"
+
+ASR_API_URL = "http://36.134.70.149:9005/api/v1/jobs"
+ASR_API_TOKEN = "OYECtTTccG1fOzsT6e8EKXR4sOBHJalv"
+ASR_LANGUAGE = "zh-CN"
