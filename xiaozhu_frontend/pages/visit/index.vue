@@ -51,6 +51,14 @@
             {{ statusText }}
           </text>
         </view>
+
+        <!-- 上传录音按钮 -->
+        <view class="upload-section" v-if="!isRecording">
+          <view class="upload-btn" :class="{ 'upload-btn-disabled': isUploading }" @click="handleUpload">
+            <text class="upload-icon">📁</text>
+            <text class="upload-btn-text">{{ isUploading ? '上传中...' : '上传录音' }}</text>
+          </view>
+        </view>
       </view>
 
       <!-- 实时转写文本区域 -->
@@ -178,6 +186,7 @@ import permission from "@/common/permission.js"
 // #endif
 import { getVoiceWsUrl } from "@/api/voice.js";
 import { uploadVisitRecord } from "@/api/visit.js";
+import { uploadAudioFile, speechToText } from "@/api/file.js";
 
 const FRAME = { FIRST: 0, CONTINUE: 1, LAST: 2 };
 const APPID = "speechvoice2";
@@ -264,6 +273,8 @@ export default {
       mapContext: null,
       pendingRecord: null,
       isNewRecord: false,
+      isUploading: false,
+      uploadProgress: 0,
     };
   },
   computed: {
@@ -288,6 +299,185 @@ export default {
       if (!this.isRecording) {
         this.startRecording();
       }
+    },
+
+    handleUpload() {
+      if (this.isUploading) return;
+      this.chooseAudioFile();
+    },
+
+    chooseAudioFile() {
+      // #ifdef H5
+      const input = document.createElement('input');
+      input.type = 'file';
+      input.accept = '.m4a,.mp3,.wav,.ogg,.flac,audio/*';
+      input.onchange = (e) => {
+        const file = e.target.files[0];
+        if (file) {
+          const blobUrl = URL.createObjectURL(file);
+          this.processUploadFile(blobUrl, file.name, file.size);
+        }
+      };
+      input.click();
+      // #endif
+
+      // #ifdef APP-PLUS
+      if (typeof plus !== 'undefined' && plus.io) {
+        plus.io.chooseFile({
+          filter: ['m4a', 'mp3', 'wav', 'ogg', 'flac'],
+          multiple: false,
+          success: (res) => {
+            if (res.files && res.files.length > 0) {
+              const file = res.files[0];
+              this.processUploadFile(file, file.split('/').pop(), 0);
+            }
+          },
+          fail: (err) => {
+            console.warn("选择文件失败:", err);
+            uni.showToast({
+              title: "选择文件失败",
+              icon: "none"
+            });
+          }
+        });
+      } else {
+        uni.chooseMessageFile({
+          count: 1,
+          type: 'file',
+          extension: ['m4a', 'mp3', 'wav', 'ogg', 'flac'],
+          success: (res) => {
+            const file = res.tempFiles[0];
+            this.processUploadFile(file.path, file.name, file.size);
+          },
+          fail: (err) => {
+            console.warn("选择文件失败:", err);
+            if (err.errMsg && err.errMsg.indexOf('cancel') === -1) {
+              uni.showToast({
+                title: "选择文件失败",
+                icon: "none"
+              });
+            }
+          }
+        });
+      }
+      // #endif
+
+      // #ifdef MP-WEIXIN
+      uni.chooseMessageFile({
+        count: 1,
+        type: 'file',
+        extension: ['m4a', 'mp3', 'wav', 'ogg', 'flac'],
+        success: (res) => {
+          const file = res.tempFiles[0];
+          this.processUploadFile(file.path, file.name, file.size);
+        },
+        fail: (err) => {
+          console.warn("选择文件失败:", err);
+          if (err.errMsg && err.errMsg.indexOf('cancel') === -1) {
+            uni.showToast({
+              title: "选择文件失败",
+              icon: "none"
+            });
+          }
+        }
+      });
+      // #endif
+    },
+
+    async processUploadFile(filePath, fileName, fileSize) {
+      if (!filePath) {
+        uni.showToast({
+          title: "文件路径无效",
+          icon: "none"
+        });
+        return;
+      }
+
+      this.isUploading = true;
+      this.uploadProgress = 0;
+
+      try {
+        uni.showLoading({
+          title: "正在上传...",
+          mask: true
+        });
+
+        const fileUrl = await uploadAudioFile(filePath);
+        console.log("上传成功，文件URL:", fileUrl);
+
+        uni.showLoading({
+          title: "正在转写...",
+          mask: true
+        });
+
+        const text = await speechToText(fileUrl);
+        console.log("转写结果:", text);
+
+        const duration = await this.getAudioDuration(filePath);
+        console.log("音频时长:", duration);
+
+        this.savedAudioPath = filePath;
+        this.recognizedText = text || "(未识别到语音内容)";
+        this.hasRecorded = true;
+        this.recordDuration = Math.floor(duration);
+        this.transcriptCollapsed = false;
+
+        const now = new Date();
+        this.pendingRecord = {
+          id: Date.now().toString(),
+          status: "processing",
+          visitTime: this.formatDateTime(now),
+          duration: Math.floor(duration),
+          durationText: this.formatDurationText(Math.floor(duration)),
+          content: this.recognizedText,
+          audioPath: fileUrl,
+          createTime: now.getTime()
+        };
+
+        this.openMapModal();
+
+        uni.showToast({
+          title: "上传成功",
+          icon: "success"
+        });
+      } catch (error) {
+        console.error("上传或转写失败:", error);
+        uni.showToast({
+          title: error.message || "上传失败",
+          icon: "none"
+        });
+      } finally {
+        uni.hideLoading();
+        this.isUploading = false;
+        this.uploadProgress = 0;
+      }
+    },
+
+    getAudioDuration(filePath) {
+      return new Promise((resolve) => {
+        // #ifdef H5
+        const audio = new Audio(filePath);
+        audio.addEventListener('loadedmetadata', () => {
+          resolve(audio.duration || 0);
+        });
+        audio.addEventListener('error', () => {
+          resolve(0);
+        });
+        audio.src = filePath;
+        // #endif
+
+        // #ifndef H5
+        uni.getFileInfo({
+          filePath: filePath,
+          success: () => {
+            resolve(0);
+          },
+          fail: () => {
+            resolve(0);
+          }
+        });
+        // #endif
+      });
     },
     
     async startRecording() {
@@ -1336,6 +1526,37 @@ export default {
 }
 .status-row {
   margin-top: 8px;
+}
+
+.upload-section {
+  margin-top: 24px;
+}
+.upload-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 12px 32px;
+  background: linear-gradient(135deg, #F8FAFC 0%, #E2E8F0 100%);
+  border-radius: 24px;
+  border: 1px solid #E2E8F0;
+  transition: all 0.3s ease;
+}
+.upload-btn:active {
+  opacity: 0.8;
+  transform: scale(0.98);
+}
+.upload-btn-disabled {
+  opacity: 0.6;
+  pointer-events: none;
+}
+.upload-icon {
+  font-size: 16px;
+}
+.upload-btn-text {
+  font-size: 14px;
+  color: #475569;
+  font-weight: 500;
 }
 
 /* 实时转写面板 */

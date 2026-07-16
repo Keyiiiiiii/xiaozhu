@@ -9,6 +9,11 @@ const config = {
     //TODO: 后端接口待实现
     baseUrl: "http://",
     uploadPath: "/api/visit/upload/"
+  },
+  fileServer: {
+    baseUrl: "http://localhost:8000",
+    uploadPath: "/api/file/upload/",
+    speechToTextPath: "/api/file/speech-to-text/"
   }
 };
 
