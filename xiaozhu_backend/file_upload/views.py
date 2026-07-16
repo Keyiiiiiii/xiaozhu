@@ -1,5 +1,6 @@
 import uuid
 import os
+import time
 import requests
 from io import BytesIO
 from django.http import JsonResponse
@@ -99,11 +100,38 @@ def speech_to_text(request):
         )
 
         response.raise_for_status()
+        job_id = response.json()["job_id"]
+
+        while True:
+            time.sleep(5)
+            response = requests.get(
+                f"{settings.ASR_API_URL}/{job_id}",
+                headers=headers,
+                timeout=30
+            )
+            response.raise_for_status()
+            job = response.json()
+            print(job["status"])
+            if job["status"] == "done":
+                break
+            if job["status"] == "failed":
+                raise RuntimeError(f"转写失败: {job}")
+
+        requests.delete(
+            f"{settings.ASR_API_URL}/{job_id}",
+            headers=headers,
+            timeout=30
+        )
 
         return JsonResponse({
             "status": "success",
-            "data": response.json()
+            "data": job
         })
+    except RuntimeError as e:
+        return JsonResponse({
+            "status": "error",
+            "message": str(e)
+        }, status=500)
     except requests.exceptions.RequestException as e:
         return JsonResponse({
             "status": "error",
