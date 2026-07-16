@@ -13,5 +13,6 @@ source venv/bin/activate
 ```bash
 pip install -r requirements.txt
 cd xiaozhu_backend
+python manage.py makemigrations
 python manage.py migrate
 ```
