@@ -431,6 +431,7 @@ export default {
           durationText: this.formatDurationText(Math.floor(duration)),
           content: this.recognizedText,
           audioPath: fileUrl,
+          isAudioUploaded: true,
           createTime: now.getTime()
         };
 
@@ -1041,6 +1042,7 @@ export default {
         durationText: this.formatDurationText(this.recordDuration),
         content: this.recognizedText,
         audioPath: this.savedAudioPath,
+        isAudioUploaded: false,
         createTime: now.getTime()
       };
       
@@ -1179,43 +1181,83 @@ export default {
       }
     },
     
-    confirmMapLocation() {
+    async confirmMapLocation() {
       if (!this.pendingRecord) {
         this.closeMapModal();
         return;
       }
-      
+
       const address = this.selectedAddress || "未知位置";
-      
-      const record = {
-        ...this.pendingRecord,
-        name: address,
-        latitude: this.selectedLatitude,
-        longitude: this.selectedLongitude
-      };
-      
-      this.historyList.unshift(record);
-      this.saveHistoryToStorage();
-      
-      this.showMapModal = false;
-      this.mapContext = null;
-      this.pendingRecord = null;
-      
-      // 弹出修改名称弹窗
-      this.editingIndex = 0;
-      this.editingName = address;
-      this.isNewRecord = true;
-      this.showNameModal = true;
-      
-      // TODO: 走访记录上传后端接口待对接
-      // 接口地址在 api/config.js 的 visitServer.baseUrl + visitServer.uploadPath
-      // 接口定义在 api/visit.js 的 uploadVisitRecord 方法
-      // 上传字段包含：name(走访名称)、text(转写文本)、duration(时长)、latitude(纬度)、longitude(经度)
-      
-      uni.showToast({
-        title: "已保存走访记录",
-        icon: "success"
-      });
+      const audioPath = this.pendingRecord.audioPath;
+      const isAudioUploaded = this.pendingRecord.isAudioUploaded;
+
+      if (!audioPath) {
+        uni.showToast({
+          title: "没有录音文件可上传",
+          icon: "none"
+        });
+        return;
+      }
+
+      try {
+        uni.showLoading({
+          title: "正在上传...",
+          mask: true
+        });
+
+        let finalAudioUrl = audioPath;
+
+        if (!isAudioUploaded) {
+          const visitDate = this.pendingRecord.visitTime
+            ? this.pendingRecord.visitTime.split(' ')[0]
+            : new Date().toISOString().split('T')[0];
+
+          const formData = {
+            creator_id: 1,
+            customer_name: address,
+            visit_time: visitDate,
+            status: 1
+          };
+
+          const res = await uploadVisitRecord(audioPath, formData);
+          console.log("走访记录上传成功:", res);
+          finalAudioUrl = res.file_url || audioPath;
+        }
+
+        const record = {
+          ...this.pendingRecord,
+          name: address,
+          latitude: this.selectedLatitude,
+          longitude: this.selectedLongitude,
+          audioPath: finalAudioUrl,
+          status: "processing"
+        };
+
+        this.historyList.unshift(record);
+        this.saveHistoryToStorage();
+
+        this.showMapModal = false;
+        this.mapContext = null;
+        this.pendingRecord = null;
+
+        this.editingIndex = 0;
+        this.editingName = address;
+        this.isNewRecord = true;
+        this.showNameModal = true;
+
+        uni.hideLoading();
+        uni.showToast({
+          title: "上传成功",
+          icon: "success"
+        });
+      } catch (error) {
+        console.error("上传走访记录失败:", error);
+        uni.hideLoading();
+        uni.showToast({
+          title: error.message || "上传失败",
+          icon: "none"
+        });
+      }
     },
     
     formatDateTime(date) {

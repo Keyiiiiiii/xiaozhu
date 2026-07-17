@@ -11,9 +11,6 @@ export function uploadAudioFile(filePath) {
       url: url,
       filePath: filePath,
       name: 'file',
-      header: {
-        'content-type': 'multipart/form-data'
-      },
       success: (res) => {
         try {
           const data = JSON.parse(res.data);
@@ -23,7 +20,8 @@ export function uploadAudioFile(filePath) {
             reject(new Error(data.message || "上传失败"));
           }
         } catch (e) {
-          reject(new Error("响应解析失败"));
+          console.error("响应解析失败，原始响应:", res);
+          reject(new Error("响应解析失败: " + (res.data || res.errMsg || "未知错误")));
         }
       },
       fail: (err) => {
