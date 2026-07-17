@@ -104,11 +104,22 @@ def upload_file(request):
 @csrf_exempt
 @require_POST
 def speech_to_text(request):
-    file_url = request.POST.get("file_url")
+    creator_id = int(request.POST.get("creator_id", 1))
+    record_id = int(request.POST.get("id", 1))
+
+    try:
+        visit_record = VisitRecord.objects.get(id=record_id, creator_id=creator_id)
+    except VisitRecord.DoesNotExist:
+        return JsonResponse({
+            "status": "error",
+            "message": f"走访记录 ID={record_id}, creator_id={creator_id} 不存在"
+        }, status=400)
+
+    file_url = visit_record.audio_url
 
     if not file_url:
         return JsonResponse(
-            {"status": "error", "message": "file_url参数不能为空"},
+            {"status": "error", "message": "该走访记录没有关联的音频文件URL"},
             status=400
         )
 
@@ -139,6 +150,9 @@ def speech_to_text(request):
         response.raise_for_status()
         job_id = response.json()["job_id"]
 
+        visit_record.status = "processing"
+        visit_record.save()
+
         while True:
             time.sleep(5)
             response = requests.get(
@@ -152,6 +166,8 @@ def speech_to_text(request):
             if job["status"] == "done":
                 break
             if job["status"] == "failed":
+                visit_record.status = "failed"
+                visit_record.save()
                 raise RuntimeError(f"转写失败: {job}")
 
         requests.delete(
@@ -159,6 +175,10 @@ def speech_to_text(request):
             headers=headers,
             timeout=30
         )
+
+        visit_record.original_text = job.get("segments", "")
+        visit_record.status = job.get("status", "")
+        visit_record.save()
 
         return JsonResponse({
             "status": "success",

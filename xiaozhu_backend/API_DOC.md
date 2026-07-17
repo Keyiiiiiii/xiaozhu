@@ -12,8 +12,14 @@ source .venv/bin/activate
 cd /xiaozhu/xiaozhu_backend
 python manage.py runserver
 # 3、请求后端接口：
-curl -X POST -F "file=@test.jpg" http://localhost:8000/api/file/upload/
-curl -X POST http://localhost:8000/api/file/speech-to-text/ -d "file_url=http://localhost:9000/xiaozhu/da16a319bd1949a783be18783b8fbf9f.m4a"
+curl -X POST http://localhost:8000/api/file/upload/ \
+  -F "file=@test.m4a" \
+  -F "creator_id=1" \      
+  -F "customer_name=张三" \   
+  -F "visit_time=2026-07-17" \
+  -F "status=1"
+
+curl -X POST http://localhost:8000/api/file/speech-to-text/ -d "creator_id=1" -d "id=1"
 ```
 
 ## 基础信息
@@ -130,7 +136,7 @@ curl -X POST http://localhost:8000/api/file/upload/ \
 
 ### 接口描述
 
-根据 MinIO 文件 URL 获取音频文件，调用外部语音转文字 API 进行转写，返回转写结果。
+根据 `creator_id` 和 `id` 从数据库 `api_visitrecord` 表中获取对应的音频文件 URL，调用外部语音转文字 API 进行转写，将转写结果存入 `original_text` 字段并更新状态。
 
 ### 请求信息
 
@@ -139,9 +145,10 @@ curl -X POST http://localhost:8000/api/file/upload/ \
 
 ### 请求参数
 
-| 参数名 | 类型 | 必填 | 说明 |
-| :--- | :--- | :--- | :--- |
-| `file_url` | String | 是 | MinIO 文件访问 URL，如 `http://localhost:9000/xiaozhu/xxx.m4a` |
+| 参数名 | 类型 | 必填 | 默认值 | 说明 |
+| :--- | :--- | :--- | :--- | :--- |
+| `creator_id` | Integer | 否 | `1` | 创建人ID，需对应 `api_user` 表中存在的用户 |
+| `id` | Integer | 否 | `1` | 走访记录ID，需对应 `api_visitrecord` 表中存在的记录 |
 
 ### 成功响应
 
@@ -149,11 +156,25 @@ curl -X POST http://localhost:8000/api/file/upload/ \
 
 ```json
 {
-    "status": "success",
+    "status": "success", 
     "data": {
-        "job_id": "xxx",
-        "status": "done",
-        "text": "语音转写的文字内容..."
+        "job_id": "3b97f597455c4296b98861d8f0225196", 
+        "status": "done", 
+        "progress": 100, 
+        "message": "Done", 
+        "segments": [
+            {"start": 0.0, 
+            "end": 2.58, 
+            "text": "\u6211\u79fb......", 
+            "speaker_label": "speaker_2", 
+            "confidence": 0.688440835154609, 
+            "speaker_confidence": null}, 
+            {...}
+        ],
+         "error": null, 
+         "elapsed_seconds": 65.0, 
+         "created_at": "2026-07-17T03:16:01", 
+         "updated_at": "2026-07-17T03:17:06"
     }
 }
 ```
@@ -165,7 +186,14 @@ curl -X POST http://localhost:8000/api/file/upload/ \
 ```json
 {
     "status": "error",
-    "message": "file_url参数不能为空"
+    "message": "走访记录 ID=1, creator_id=1 不存在"
+}
+```
+
+```json
+{
+    "status": "error",
+    "message": "该走访记录没有关联的音频文件URL"
 }
 ```
 
@@ -196,23 +224,39 @@ curl -X POST http://localhost:8000/api/file/upload/ \
 
 ```bash
 curl -X POST http://localhost:8000/api/file/speech-to-text/ \
-  -d "file_url=http://localhost:9000/xiaozhu/da16a319bd1949a783be18783b8fbf9f.m4a"
+  -d "creator_id=1" \
+  -d "id=1"
 ```
+
+### 数据库更新
+
+转写完成后，会更新 `api_visitrecord` 表中对应记录：
+
+| 字段 | 更新逻辑 |
+| :--- | :--- |
+| `original_text` | 存入语音转写结果（`segments` 字段内容） |
+| `status` | 根据转写状态更新：`processing` → `success` / `failed` |
 
 ---
 
 ## 接口调用流程
 
 ```
-客户端上传文件 → 获取 file_url → 调用语音转文字接口 → 获取转写结果
+客户端上传文件 → 创建走访记录 → 调用语音转文字接口 → 获取转写结果
     ↓                    ↓                      ↓
-POST /upload/         file_url              POST /speech-to-text/
+POST /upload/         DB记录               POST /speech-to-text/
+    ↓              (creator_id,              (creator_id, id)
+ 上传到MinIO        id, audio_url)              ↓
     ↓                                          ↓
- 上传到MinIO                              从MinIO下载文件
-    ↓                                          ↓
- 返回file_url                              调用外部ASR API
-                                            创建任务 → 轮询状态 → 删除任务
+ 创建VisitRecord                           查询DB获取audio_url
+ (含MinIO URL)                                  ↓
+                                              从MinIO下载文件
                                                  ↓
+                                              调用外部ASR API
+                                              创建任务 → 轮询状态 → 删除任务
+                                                    ↓
+                                              更新DB: original_text + status
+                                                    ↓
                                               返回转写结果
 ```
 
