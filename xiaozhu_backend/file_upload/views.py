@@ -81,7 +81,7 @@ def upload_file(request):
                 "message": f"用户ID {creator_id} 不存在"
             }, status=400)
 
-        VisitRecord.objects.create(
+        visit_record = VisitRecord.objects.create(
             creator=creator,
             customer_name=customer_name,
             audio_url=result["url"],
@@ -92,7 +92,8 @@ def upload_file(request):
         return JsonResponse({
             "status": "success",
             "message": "文件上传成功",
-            "file_url": result["url"]
+            "file_url": result["url"],
+            "record_id": visit_record.id
         })
     else:
         return JsonResponse({

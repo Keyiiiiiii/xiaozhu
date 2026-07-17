@@ -76,7 +76,8 @@ curl -X POST http://localhost:8000/api/file/speech-to-text/ -d "creator_id=1" -d
 {
     "status": "success",
     "message": "文件上传成功",
-    "file_url": "http://localhost:9000/xiaozhu/da16a319bd1949a783be18783b8fbf9f.m4a"
+    "file_url": "http://localhost:9000/xiaozhu/da16a319bd1949a783be18783b8fbf9f.m4a",
+    "record_id": 1
 }
 ```
 
