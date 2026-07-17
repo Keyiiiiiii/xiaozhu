@@ -1,17 +1,9 @@
-const API_CONFIG = {
-  // #ifdef H5
-  baseUrl: '/api/knowledge',
-  // #endif
-  // #ifndef H5
-  baseUrl: 'http://36.212.132.154:30086/berry-apps/server/apps/GtjGSJ2V4rrQP-rg457sbi3BDJM7vyDv',
-  // #endif
-  apiPath: '/api'
-};
+const baseUrl = '/api/knowledge';
+const apiPath = '/api';
 
 export function sendKnowledgeQuery(question) {
   return new Promise((resolve, reject) => {
-    const baseUrl = API_CONFIG.baseUrl.replace(/\/+$/, '');
-    const url = `${baseUrl}${API_CONFIG.apiPath}?streaming=true`;
+    const url = `${baseUrl}${apiPath}?streaming=true`;
     
     const requestData = {
       ques: question,
@@ -23,8 +15,6 @@ export function sendKnowledgeQuery(question) {
       stream: false
     };
     
-    console.log('发送知识库查询:', url, requestData);
-    
     uni.request({
       url: url,
       method: 'POST',
@@ -33,7 +23,6 @@ export function sendKnowledgeQuery(question) {
         'Content-Type': 'application/json'
       },
       success: (res) => {
-        console.log('知识库查询结果:', res);
         if (res.statusCode === 200) {
           resolve(res.data);
         } else {
@@ -41,7 +30,6 @@ export function sendKnowledgeQuery(question) {
         }
       },
       fail: (err) => {
-        console.error('知识库查询失败:', err);
         reject(new Error(err.errMsg || '网络请求失败'));
       }
     });
