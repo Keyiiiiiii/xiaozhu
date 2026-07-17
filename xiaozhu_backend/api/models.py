@@ -63,13 +63,17 @@ class VisitRecord(models.Model):
     )
     audio_url = models.URLField(
         max_length=500, 
+        null=True, 
+        blank=True,
         verbose_name="音频文件URL"
     )
     original_text = models.TextField(
+        null=True, 
         blank=True, 
         verbose_name="原始转写文本"
     )
     ai_summary = models.TextField(
+        null=True, 
         blank=True, 
         verbose_name="AI总结文本"
     )
@@ -78,6 +82,8 @@ class VisitRecord(models.Model):
         verbose_name="走访时间"
     )
     business_type = models.CharField(
+        null=True, 
+        blank=True,
         max_length=100, 
         verbose_name="关联业务类型"
     )
@@ -150,6 +156,10 @@ class Notification(models.Model):
     """
     Notification broadcast records categorized by levels and targets.
     """
+    STATUS_CHOICES = [
+        ("unread", "未读"),
+        ("read", "已读"),
+    ]
     title = models.CharField(
         max_length=250, 
         verbose_name="标题"
@@ -168,6 +178,8 @@ class Notification(models.Model):
     )
     status = models.CharField(
         max_length=50, 
+        choices=STATUS_CHOICES,
+        default="unread",
         verbose_name="状态"
     )
 
