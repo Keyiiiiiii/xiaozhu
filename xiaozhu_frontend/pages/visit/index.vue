@@ -185,8 +185,7 @@
 import permission from "@/common/permission.js"
 // #endif
 import { getVoiceWsUrl } from "@/api/voice.js";
-import { uploadVisitRecord } from "@/api/visit.js";
-import { uploadAudioFile, speechToText } from "@/api/file.js";
+import { uploadAudioFile, uploadVisitRecordApi, speechToText } from "@/api/file.js";
 
 const FRAME = { FIRST: 0, CONTINUE: 1, LAST: 2 };
 const APPID = "speechvoice2";
@@ -245,6 +244,9 @@ export default {
       
       // 录音文件本地保存路径
       savedAudioPath: "",
+      // H5 端录音的 File 对象（带正确文件名后缀）
+      savedAudioFile: null,
+      savedAudioFileName: "",
       // 是否已完成录音（用于显示完成按钮）
       hasRecorded: false,
       // 走访记录面板是否收起
@@ -315,7 +317,7 @@ export default {
         const file = e.target.files[0];
         if (file) {
           const blobUrl = URL.createObjectURL(file);
-          this.processUploadFile(blobUrl, file.name, file.size);
+          this.processUploadFile(blobUrl, file.name, file.size, file);
         }
       };
       input.click();
@@ -384,7 +386,7 @@ export default {
       // #endif
     },
 
-    async processUploadFile(filePath, fileName, fileSize) {
+    async processUploadFile(filePath, fileName, fileSize, fileObject) {
       if (!filePath) {
         uni.showToast({
           title: "文件路径无效",
@@ -402,15 +404,17 @@ export default {
           mask: true
         });
 
-        const fileUrl = await uploadAudioFile(filePath);
-        console.log("上传成功，文件URL:", fileUrl);
+        const uploadResult = await uploadAudioFile(filePath, { creator_id: 1 }, fileObject);
+        console.log("上传成功:", uploadResult);
+        const fileUrl = uploadResult.file_url;
+        const recordId = uploadResult.record_id;
 
         uni.showLoading({
           title: "正在转写...",
           mask: true
         });
 
-        const text = await speechToText(fileUrl);
+        const text = await speechToText(recordId, 1);
         console.log("转写结果:", text);
 
         const duration = await this.getAudioDuration(filePath);
@@ -431,6 +435,7 @@ export default {
           durationText: this.formatDurationText(Math.floor(duration)),
           content: this.recognizedText,
           audioPath: fileUrl,
+          recordId: recordId,
           isAudioUploaded: true,
           createTime: now.getTime()
         };
@@ -490,6 +495,8 @@ export default {
         this.isRecognizing = false;
         this.hasRecorded = false;
         this.savedAudioPath = "";
+        this.savedAudioFile = null;
+        this.savedAudioFileName = "";
         this.transcriptCollapsed = false;
         
         // 先获取 WebSocket URL
@@ -791,6 +798,9 @@ export default {
       const blob = new Blob([wavBuffer], { type: 'audio/wav' });
       
       const fileName = `record_${Date.now()}.wav`;
+      const file = new File([blob], fileName, { type: 'audio/wav' });
+      this.savedAudioFile = file;
+      this.savedAudioFileName = fileName;
       this.savedAudioPath = URL.createObjectURL(blob);
       
       try {
@@ -1073,6 +1083,8 @@ export default {
       this.transcriptCollapsed = false;
       this.textSegments = [];
       this.savedAudioPath = "";
+      this.savedAudioFile = null;
+      this.savedAudioFileName = "";
       this.recordDuration = 0;
     },
     
@@ -1206,6 +1218,7 @@ export default {
         });
 
         let finalAudioUrl = audioPath;
+        let serverRecordId = this.pendingRecord.recordId || null;
 
         if (!isAudioUploaded) {
           const visitDate = this.pendingRecord.visitTime
@@ -1219,9 +1232,23 @@ export default {
             status: 1
           };
 
-          const res = await uploadVisitRecord(audioPath, formData);
+          const res = await uploadVisitRecordApi(audioPath, formData, this.savedAudioFile);
           console.log("走访记录上传成功:", res);
           finalAudioUrl = res.file_url || audioPath;
+          serverRecordId = res.record_id;
+        }
+
+        if (serverRecordId && !this.pendingRecord.content) {
+          uni.showLoading({
+            title: "正在转写...",
+            mask: true
+          });
+          try {
+            const text = await speechToText(serverRecordId, 1);
+            this.recognizedText = text || "(未识别到语音内容)";
+          } catch (sttError) {
+            console.warn("语音转文字失败，使用本地识别结果:", sttError);
+          }
         }
 
         const record = {
@@ -1230,6 +1257,8 @@ export default {
           latitude: this.selectedLatitude,
           longitude: this.selectedLongitude,
           audioPath: finalAudioUrl,
+          recordId: serverRecordId,
+          content: this.recognizedText || this.pendingRecord.content,
           status: "processing"
         };
 
@@ -1305,6 +1334,8 @@ export default {
         this.isNewRecord = false;
         this.textSegments = [];
         this.savedAudioPath = "";
+        this.savedAudioFile = null;
+        this.savedAudioFileName = "";
         this.recordDuration = 0;
       }
     },
@@ -1333,6 +1364,8 @@ export default {
         this.isNewRecord = false;
         this.textSegments = [];
         this.savedAudioPath = "";
+        this.savedAudioFile = null;
+        this.savedAudioFileName = "";
         this.recordDuration = 0;
       }
     },
@@ -1361,6 +1394,8 @@ export default {
       this.recognizedText = "";
       this.textSegments = [];
       this.savedAudioPath = "";
+      this.savedAudioFile = null;
+      this.savedAudioFileName = "";
       this.recordDuration = 0;
       this.transcriptCollapsed = false;
     },
