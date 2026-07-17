@@ -28,7 +28,7 @@ curl -X POST http://localhost:8000/api/file/speech-to-text/ -d "file_url=http://
 
 ### 接口描述
 
-上传音频文件到 MinIO 存储，并返回文件访问 URL。
+上传音频文件到 MinIO 存储，同时在数据库 `api_visitrecord` 表中创建走访记录，并返回文件访问 URL。
 
 ### 请求信息
 
@@ -37,9 +37,22 @@ curl -X POST http://localhost:8000/api/file/speech-to-text/ -d "file_url=http://
 
 ### 请求参数
 
-| 参数名 | 类型 | 必填 | 说明 |
-| :--- | :--- | :--- | :--- |
-| `file` | File | 是 | 音频文件，支持字段名：`file`、`files`、`file[]`、`files[]` |
+| 参数名 | 类型 | 必填 | 默认值 | 说明 |
+| :--- | :--- | :--- | :--- | :--- |
+| `file` | File | 是 | - | 音频文件，支持字段名：`file`、`files`、`file[]`、`files[]` |
+| `creator_id` | Integer | 否 | `1` | 创建人ID，需对应 `api_user` 表中存在的用户 |
+| `customer_name` | String | 否 | `"cus"` | 走访对象名称 |
+| `visit_time` | String | 否 | `"2026-07-01"` | 走访时间，格式：`YYYY-MM-DD` |
+| `status` | Integer | 否 | `1` | 状态值，映射关系见下表 |
+
+### 状态值映射
+
+| 数字值 | 字符串值 | 说明 |
+| :--- | :--- | :--- |
+| `1` | `pending` | 等待处理 |
+| `2` | `processing` | 处理中 |
+| `3` | `success` | 处理成功 |
+| `4` | `failed` | 处理失败 |
 
 ### 支持的文件格式
 
@@ -72,6 +85,13 @@ curl -X POST http://localhost:8000/api/file/speech-to-text/ -d "file_url=http://
 }
 ```
 
+```json
+{
+    "status": "error",
+    "message": "用户ID 1 不存在"
+}
+```
+
 **Status Code**: `500 Internal Server Error`
 
 ```json
@@ -85,8 +105,24 @@ curl -X POST http://localhost:8000/api/file/speech-to-text/ -d "file_url=http://
 
 ```bash
 curl -X POST http://localhost:8000/api/file/upload/ \
-  -F "file=@test.m4a"
+  -F "file=@test.m4a" \
+  -F "creator_id=1" \
+  -F "customer_name=张三" \
+  -F "visit_time=2026-07-17" \
+  -F "status=1"
 ```
+
+### 数据库记录
+
+上传成功后，会在 `api_visitrecord` 表中创建一条记录：
+
+| 字段 | 说明 |
+| :--- | :--- |
+| `creator_id` | 创建人ID，关联 `api_user` 表 |
+| `customer_name` | 走访对象名称 |
+| `audio_url` | MinIO 文件访问 URL |
+| `visit_time` | 走访时间 |
+| `status` | 处理状态 |
 
 ---
 

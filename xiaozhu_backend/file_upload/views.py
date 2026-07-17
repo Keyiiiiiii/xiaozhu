@@ -3,11 +3,13 @@ import os
 import time
 import requests
 from io import BytesIO
+from datetime import datetime
 from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
 from django.conf import settings
 from .minio_client import upload_file_to_minio, get_file_from_minio
+from api.models import VisitRecord, User
 
 AUDIO_CONTENT_TYPES = {
     ".m4a": "audio/m4a",
@@ -15,6 +17,13 @@ AUDIO_CONTENT_TYPES = {
     ".wav": "audio/wav",
     ".ogg": "audio/ogg",
     ".flac": "audio/flac",
+}
+
+STATUS_MAP = {
+    1: "pending",
+    2: "processing",
+    3: "success",
+    4: "failed",
 }
 
 
@@ -52,6 +61,34 @@ def upload_file(request):
     result = upload_file_to_minio(uploaded_file, object_name)
 
     if result["success"]:
+        creator_id = int(request.POST.get("creator_id", 1))
+        customer_name = request.POST.get("customer_name", "cus")
+        visit_time_str = request.POST.get("visit_time", "2026-07-01")
+        status = int(request.POST.get("status", 1))
+
+        try:
+            visit_time = datetime.strptime(visit_time_str, "%Y-%m-%d")
+        except ValueError:
+            visit_time = datetime.now()
+
+        status_str = STATUS_MAP.get(status, "pending")
+
+        try:
+            creator = User.objects.get(id=creator_id)
+        except User.DoesNotExist:
+            return JsonResponse({
+                "status": "error",
+                "message": f"用户ID {creator_id} 不存在"
+            }, status=400)
+
+        VisitRecord.objects.create(
+            creator=creator,
+            customer_name=customer_name,
+            audio_url=result["url"],
+            visit_time=visit_time,
+            status=status_str
+        )
+
         return JsonResponse({
             "status": "success",
             "message": "文件上传成功",
