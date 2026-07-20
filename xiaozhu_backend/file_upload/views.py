@@ -13,6 +13,7 @@ from django.db import close_old_connections
 from channels.layers import get_channel_layer
 from asgiref.sync import async_to_sync
 from .minio_client import upload_file_to_minio, get_file_from_minio
+from .askApi import call_llm_api, parse_llm_response, API_URL, API_KEY
 from api.models import VisitRecord, User
 
 AUDIO_CONTENT_TYPES = {
@@ -273,4 +274,65 @@ def speech_to_text(request):
         return JsonResponse({
             "status": "error",
             "message": f"调用语音转文字API失败: {str(e)}"
+        }, status=500)
+
+
+@csrf_exempt
+@require_POST
+def summarize_record(request):
+    creator_id = int(request.POST.get("creator_id", 0))
+    record_id = int(request.POST.get("id", 0))
+
+    if not creator_id or not record_id:
+        return JsonResponse({
+            "status": "error",
+            "message": "id 和 record_id 不能为空。"
+        }, status=400)
+
+    try:
+        visit_record = VisitRecord.objects.get(id=record_id, creator_id=creator_id)
+    except VisitRecord.DoesNotExist:
+        return JsonResponse({
+            "status": "error",
+            "message": f"走访记录 ID={record_id}, creator_id={creator_id} 不存在"
+        }, status=400)
+
+    original_text = visit_record.original_text
+    if not original_text or not original_text.strip():
+        return JsonResponse({
+            "status": "error",
+            "message": "原始转写文本为空，无法进行总结"
+        }, status=400)
+
+    try:
+        response = call_llm_api(API_URL, API_KEY, original_text, str(creator_id), False)
+
+        if isinstance(response, str):
+            return JsonResponse({
+                "status": "error",
+                "message": f"调用总结API失败: {response}"
+            }, status=500)
+
+        raw_text = response["data"]["data"]["outputs"]["text"]
+        parsed_data = parse_llm_response(raw_text)
+        ai_summary = parsed_data.get("summary", "")
+
+        visit_record.ai_summary = ai_summary
+        visit_record.save()
+
+        return JsonResponse({
+            "status": "success",
+            "message": "总结成功",
+            "ai_summary": ai_summary,
+            "record_id": record_id
+        })
+    except requests.exceptions.RequestException as e:
+        return JsonResponse({
+            "status": "error",
+            "message": f"调用总结API失败: {str(e)}"
+        }, status=500)
+    except KeyError as e:
+        return JsonResponse({
+            "status": "error",
+            "message": f"总结API响应格式错误: {str(e)}"
         }, status=500)

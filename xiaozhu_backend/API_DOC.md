@@ -26,6 +26,8 @@ curl -X POST http://localhost:8000/api/file/upload/ \
   -F "status=1"
 
 curl -X POST http://localhost:8000/api/file/speech-to-text/ -d "creator_id=1" -d "id=1"
+
+curl -X POST http://localhost:8000/api/file/summarize/ -d "creator_id=1" -d "id=1"
 # 5、WebSocket连接获取转写结果：
 ws://localhost:8000/ws/asr/{job_id}/
 ```
@@ -352,19 +354,109 @@ asyncio.run(get_asr_result('your_job_id_here'))
 
 ---
 
+## 4. 录音内容总结接口
+
+### 接口描述
+
+根据 `id`（creator_id）和 `record_id` 从数据库 `api_visitrecord` 表中获取 `original_text` 字段内容，调用 AI 总结接口进行总结，并将总结结果存入 `ai_summary` 字段。
+
+### 请求信息
+
+- **URL**: `POST /api/file/summarize/`
+- **Method**: `POST`
+
+### 请求参数
+
+| 参数名 | 类型 | 必填 | 默认值 | 说明 |
+| :--- | :--- | :--- | :--- | :--- |
+| `id` | Integer | 是 | - | 创建人ID，需对应 `api_user` 表中存在的用户 |
+| `record_id` | Integer | 是 | - | 走访记录ID，需对应 `api_visitrecord` 表中存在的记录 |
+
+### 成功响应
+
+**Status Code**: `200 OK`
+
+```json
+{
+    "status": "success",
+    "message": "总结成功",
+    "ai_summary": "总结内容...",
+    "record_id": 1
+}
+```
+
+### 失败响应
+
+**Status Code**: `400 Bad Request`
+
+```json
+{
+    "status": "error",
+    "message": "id 和 record_id 不能为空"
+}
+```
+
+```json
+{
+    "status": "error",
+    "message": "走访记录 ID=1, creator_id=1 不存在"
+}
+```
+
+```json
+{
+    "status": "error",
+    "message": "原始转写文本为空，无法进行总结"
+}
+```
+
+**Status Code**: `500 Internal Server Error`
+
+```json
+{
+    "status": "error",
+    "message": "调用总结API失败: ConnectionError: ..."
+}
+```
+
+```json
+{
+    "status": "error",
+    "message": "总结API响应格式错误: data"
+}
+```
+
+### 示例请求
+
+```bash
+curl -X POST http://localhost:8000/api/file/summarize/ \
+  -d "id=1" \
+  -d "record_id=1"
+```
+
+### 数据库更新
+
+总结成功后，会更新 `api_visitrecord` 表中对应记录：
+
+| 字段 | 更新逻辑 |
+| :--- | :--- |
+| `ai_summary` | 存入 AI 总结结果 |
+
+---
+
 ## 接口调用流程
 
 ```
-客户端上传文件 → 创建走访记录 → 调用语音转文字接口 → 建立WebSocket → 接收转写结果
-    ↓                    ↓                      ↓                ↓
-POST /upload/         DB记录               POST /speech-to-text/   ws://localhost:8000/ws/asr/{job_id}/
-    ↓              (creator_id,              (creator_id, id)         ↓
- 上传到MinIO        id, audio_url)              ↓                  等待推送
-    ↓                                          ↓                    ↓
- 创建VisitRecord                           查询DB获取audio_url   转写结果
- (含MinIO URL)                                  ↓                    ↓
-                                              从MinIO下载文件      连接关闭
-                                                 ↓
+客户端上传文件 → 创建走访记录 → 调用语音转文字接口 → 建立WebSocket → 接收转写结果 → 调用总结接口
+    ↓                    ↓                      ↓                ↓                    ↓
+POST /upload/         DB记录               POST /speech-to-text/   ws://localhost:8000/ws/asr/{job_id}/   POST /summarize/
+    ↓              (creator_id,              (creator_id, id)         ↓                    (id, record_id)
+ 上传到MinIO        id, audio_url)              ↓                  等待推送                  ↓
+    ↓                                          ↓                    ↓                    查询DB获取original_text
+ 创建VisitRecord                           查询DB获取audio_url   转写结果                    ↓
+ (含MinIO URL)                                  ↓                    ↓                    调用外部总结API
+                                              从MinIO下载文件      连接关闭                    ↓
+                                                 ↓                                         更新DB: ai_summary
                                               调用外部ASR API
                                               创建任务（返回job_id）
                                               ↓
@@ -497,6 +589,26 @@ wscat -c ws://localhost:8000/ws/asr/{job_id}/
 const ws = new WebSocket('ws://localhost:8000/ws/asr/{job_id}/');
 ws.onmessage = e => console.log(JSON.parse(e.data));
 ws.onclose = () => console.log('连接关闭');
+```
+
+#### 步骤4: 调用总结接口
+
+转写完成后，调用总结接口对录音内容进行 AI 总结：
+
+```bash
+curl -X POST http://localhost:8000/api/file/summarize/ \
+  -d "id=1" \
+  -d "record_id=1"
+```
+
+预期响应:
+```json
+{
+    "status": "success",
+    "message": "总结成功",
+    "ai_summary": "总结内容...",
+    "record_id": 1
+}
 ```
 
 ### 注意事项
