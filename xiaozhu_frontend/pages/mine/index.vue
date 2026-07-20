@@ -15,12 +15,15 @@
 
     <!-- 设置组 1 -->
     <view class="menu-group">
-      <view class="menu-item">
+      <view class="menu-item" @click="goToNotificationSettings">
         <view class="menu-left">
           <view class="menu-icon">通</view>
           <text class="menu-label">通知与提醒设置</text>
         </view>
-        <text class="menu-arrow">></text>
+        <view class="menu-right">
+          <text class="menu-value">{{ notificationSummary }}</text>
+          <text class="menu-arrow">></text>
+        </view>
       </view>
       <view class="menu-item">
         <view class="menu-left">
@@ -73,15 +76,49 @@
 import { mapState, mapMutations } from 'vuex';
 import loginApi from '@/api/login.js';
 
+const STORAGE_KEY = 'notification_settings';
+
 export default {
   data() {
-    return {};
+    return {
+      notificationSettings: {
+        notificationEnabled: true,
+        soundEnabled: true,
+        vibrateEnabled: true
+      }
+    };
   },
   computed: {
-    ...mapState(['userInfo'])
+    ...mapState(['userInfo']),
+    notificationSummary() {
+      const { notificationEnabled, soundEnabled, vibrateEnabled } = this.notificationSettings;
+      if (!notificationEnabled) return '已关闭';
+      if (soundEnabled && vibrateEnabled) return '声音+震动';
+      if (soundEnabled) return '仅声音';
+      if (vibrateEnabled) return '仅震动';
+      return '已静音';
+    }
+  },
+  onShow() {
+    this.loadNotificationSettings();
   },
   methods: {
     ...mapMutations(['logout']),
+    loadNotificationSettings() {
+      const saved = uni.getStorageSync(STORAGE_KEY);
+      if (saved) {
+        this.notificationSettings = {
+          notificationEnabled: saved.notificationEnabled !== undefined ? saved.notificationEnabled : true,
+          soundEnabled: saved.soundEnabled !== undefined ? saved.soundEnabled : true,
+          vibrateEnabled: saved.vibrateEnabled !== undefined ? saved.vibrateEnabled : true
+        };
+      }
+    },
+    goToNotificationSettings() {
+      uni.navigateTo({
+        url: '/pages/mine/notification-settings'
+      });
+    },
     handleLogout() {
       uni.showModal({
         title: '提示',

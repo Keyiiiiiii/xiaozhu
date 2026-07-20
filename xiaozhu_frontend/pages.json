@@ -44,6 +44,13 @@
 				"navigationBarBackgroundColor": "#0085D0",
 				"navigationBarTextStyle": "white"
 			}
+		},
+		{
+			"path": "pages/mine/notification-settings",
+			"style": {
+				"navigationBarTitleText": "通知与提醒设置",
+				"navigationStyle": "custom"
+			}
 		}
 	],
 	"globalStyle": {
