@@ -23,6 +23,7 @@ const store = createStore({
 		activeOpen: '',
 		menu: [],
 		univerifyErrorMsg: '',
+		userInfo: null,
 		// vuex测试例使用
 		username: "foo",
 		sex: "男",
@@ -36,6 +37,12 @@ const store = createStore({
 		logout(state) {
 			state.hasLogin = false
 			state.openid = null
+			state.userInfo = null
+			uni.removeStorageSync('token');
+			uni.removeStorageSync('userInfo');
+		},
+		setUserInfo(state, userInfo) {
+			state.userInfo = userInfo;
 		},
 		setOpenid(state, openid) {
 			state.openid = openid

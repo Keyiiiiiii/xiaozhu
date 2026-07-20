@@ -34,6 +34,7 @@ ALLOWED_HOSTS = ["localhost", "127.0.0.1"]
 # Application definition
 
 INSTALLED_APPS = [
+    "channels",
     "django.contrib.admin",
     "django.contrib.auth",
     "django.contrib.contenttypes",
@@ -45,6 +46,7 @@ INSTALLED_APPS = [
 ]
 
 MIDDLEWARE = [
+    "xiaozhu_backend.cors_middleware.CorsMiddleware",
     "django.middleware.security.SecurityMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
@@ -146,3 +148,14 @@ AUTH_USER_MODEL = "api.User"
 ASR_API_URL = "http://36.134.70.149:9005/api/v1/jobs"
 ASR_API_TOKEN = "OYECtTTccG1fOzsT6e8EKXR4sOBHJalv"
 ASR_LANGUAGE = "zh"
+
+ASGI_APPLICATION = "xiaozhu_backend.asgi.application"
+
+CHANNEL_LAYERS = {
+    "default": {
+        "BACKEND": "channels_redis.core.RedisChannelLayer",
+        "CONFIG": {
+            "hosts": [("127.0.0.1", 6379)],
+        },
+    },
+}

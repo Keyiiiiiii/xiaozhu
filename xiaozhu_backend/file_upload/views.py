@@ -1,13 +1,19 @@
 import uuid
 import os
 import time
+import threading
 import requests
 from io import BytesIO
+from datetime import datetime
 from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
 from django.conf import settings
+from django.db import close_old_connections
+from channels.layers import get_channel_layer
+from asgiref.sync import async_to_sync
 from .minio_client import upload_file_to_minio, get_file_from_minio
+from api.models import VisitRecord, User
 
 AUDIO_CONTENT_TYPES = {
     ".m4a": "audio/m4a",
@@ -15,6 +21,13 @@ AUDIO_CONTENT_TYPES = {
     ".wav": "audio/wav",
     ".ogg": "audio/ogg",
     ".flac": "audio/flac",
+}
+
+STATUS_MAP = {
+    1: "pending",
+    2: "processing",
+    3: "success",
+    4: "failed",
 }
 
 
@@ -52,10 +65,39 @@ def upload_file(request):
     result = upload_file_to_minio(uploaded_file, object_name)
 
     if result["success"]:
+        creator_id = int(request.POST.get("creator_id", 1))
+        customer_name = request.POST.get("customer_name", "cus")
+        visit_time_str = request.POST.get("visit_time", "2026-07-01")
+        status = int(request.POST.get("status", 1))
+
+        try:
+            visit_time = datetime.strptime(visit_time_str, "%Y-%m-%d")
+        except ValueError:
+            visit_time = datetime.now()
+
+        status_str = STATUS_MAP.get(status, "pending")
+
+        try:
+            creator = User.objects.get(id=creator_id)
+        except User.DoesNotExist:
+            return JsonResponse({
+                "status": "error",
+                "message": f"用户ID {creator_id} 不存在"
+            }, status=400)
+
+        visit_record = VisitRecord.objects.create(
+            creator=creator,
+            customer_name=customer_name,
+            audio_url=result["url"],
+            visit_time=visit_time,
+            status=status_str
+        )
+
         return JsonResponse({
             "status": "success",
             "message": "文件上传成功",
-            "file_url": result["url"]
+            "file_url": result["url"],
+            "record_id": visit_record.id
         })
     else:
         return JsonResponse({
@@ -64,14 +106,123 @@ def upload_file(request):
         }, status=500)
 
 
+def poll_asr_job(job_id, record_id, headers):
+    max_poll_count = 120
+    poll_count = 0
+
+    try:
+        while poll_count < max_poll_count:
+            poll_count += 1
+            time.sleep(5)
+            response = requests.get(
+                f"{settings.ASR_API_URL}/{job_id}",
+                headers=headers,
+                timeout=30
+            )
+            response.raise_for_status()
+            job = response.json()
+            print(job["status"])
+
+            if job["status"] == "done":
+                requests.delete(
+                    f"{settings.ASR_API_URL}/{job_id}",
+                    headers=headers,
+                    timeout=30
+                )
+
+                visit_record = VisitRecord.objects.get(id=record_id)
+                visit_record.original_text = job.get("segments", "")
+                visit_record.status = "success"
+                visit_record.save()
+
+                channel_layer = get_channel_layer()
+                async_to_sync(channel_layer.group_send)(
+                    f"asr_{job_id}",
+                    {
+                        "type": "asr_result",
+                        "message": {
+                            "status": "success",
+                            "data": job
+                        }
+                    }
+                )
+                break
+
+            if job["status"] == "failed":
+                visit_record = VisitRecord.objects.get(id=record_id)
+                visit_record.status = "failed"
+                visit_record.save()
+
+                channel_layer = get_channel_layer()
+                async_to_sync(channel_layer.group_send)(
+                    f"asr_{job_id}",
+                    {
+                        "type": "asr_result",
+                        "message": {
+                            "status": "error",
+                            "message": f"转写失败: {job}"
+                        }
+                    }
+                )
+                break
+        else:
+            visit_record = VisitRecord.objects.get(id=record_id)
+            visit_record.status = "failed"
+            visit_record.save()
+
+            channel_layer = get_channel_layer()
+            async_to_sync(channel_layer.group_send)(
+                f"asr_{job_id}",
+                {
+                    "type": "asr_result",
+                    "message": {
+                        "status": "error",
+                        "message": f"转写超时: 超过 {max_poll_count * 5} 秒"
+                    }
+                }
+            )
+    except Exception as e:
+        try:
+            visit_record = VisitRecord.objects.get(id=record_id)
+            visit_record.status = "failed"
+            visit_record.save()
+        except VisitRecord.DoesNotExist:
+            pass
+
+        channel_layer = get_channel_layer()
+        async_to_sync(channel_layer.group_send)(
+            f"asr_{job_id}",
+            {
+                "type": "asr_result",
+                "message": {
+                    "status": "error",
+                    "message": f"调用语音转文字API失败: {str(e)}"
+                }
+            }
+        )
+    finally:
+        close_old_connections()
+
+
 @csrf_exempt
 @require_POST
 def speech_to_text(request):
-    file_url = request.POST.get("file_url")
+    creator_id = int(request.POST.get("creator_id", 1))
+    record_id = int(request.POST.get("id", 1))
+
+    try:
+        visit_record = VisitRecord.objects.get(id=record_id, creator_id=creator_id)
+    except VisitRecord.DoesNotExist:
+        return JsonResponse({
+            "status": "error",
+            "message": f"走访记录 ID={record_id}, creator_id={creator_id} 不存在"
+        }, status=400)
+
+    file_url = visit_record.audio_url
 
     if not file_url:
         return JsonResponse(
-            {"status": "error", "message": "file_url参数不能为空"},
+            {"status": "error", "message": "该走访记录没有关联的音频文件URL"},
             status=400
         )
 
@@ -102,36 +253,22 @@ def speech_to_text(request):
         response.raise_for_status()
         job_id = response.json()["job_id"]
 
-        while True:
-            time.sleep(5)
-            response = requests.get(
-                f"{settings.ASR_API_URL}/{job_id}",
-                headers=headers,
-                timeout=30
-            )
-            response.raise_for_status()
-            job = response.json()
-            print(job["status"])
-            if job["status"] == "done":
-                break
-            if job["status"] == "failed":
-                raise RuntimeError(f"转写失败: {job}")
+        visit_record.status = "processing"
+        visit_record.save()
 
-        requests.delete(
-            f"{settings.ASR_API_URL}/{job_id}",
-            headers=headers,
-            timeout=30
+        thread = threading.Thread(
+            target=poll_asr_job,
+            args=(job_id, record_id, headers),
+            daemon=True
         )
+        thread.start()
 
         return JsonResponse({
             "status": "success",
-            "data": job
+            "message": "转写任务已提交",
+            "job_id": job_id,
+            "record_id": record_id
         })
-    except RuntimeError as e:
-        return JsonResponse({
-            "status": "error",
-            "message": str(e)
-        }, status=500)
     except requests.exceptions.RequestException as e:
         return JsonResponse({
             "status": "error",

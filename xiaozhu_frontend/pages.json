@@ -1,6 +1,13 @@
 {
 	"pages": [
 		{
+			"path": "pages/login/index",
+			"style": {
+				"navigationBarTitleText": "登录",
+				"navigationStyle": "custom"
+			}
+		},
+		{
 			"path": "pages/workbench/index",
 			"style": {
 				"navigationBarTitleText": "工作台"
@@ -36,6 +43,13 @@
 				"navigationBarTitleText": "我的",
 				"navigationBarBackgroundColor": "#0085D0",
 				"navigationBarTextStyle": "white"
+			}
+		},
+		{
+			"path": "pages/mine/notification-settings",
+			"style": {
+				"navigationBarTitleText": "通知与提醒设置",
+				"navigationStyle": "custom"
 			}
 		}
 	],

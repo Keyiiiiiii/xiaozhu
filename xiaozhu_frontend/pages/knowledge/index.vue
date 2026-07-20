@@ -1,5 +1,5 @@
 <template>
-  <view class="container">
+  <view class="chat-page" :style="{ height: pageHeight + 'px' }">
     <view class="navbar">
       <text class="navbar-title">知识库</text>
     </view>
@@ -7,16 +7,10 @@
     <scroll-view 
       class="chat-list" 
       scroll-y 
-      :scroll-top="scrollTop"
-      :scroll-with-animation="true"
-      :style="{ height: chatListHeight + 'px' }"
       :scroll-into-view="scrollToId"
+      scroll-with-animation
     >
-      <view 
-        v-for="(msg, index) in messages" 
-        :key="index"
-        :id="'msg-' + index"
-      >
+      <view v-for="(msg, index) in messages" :key="index">
         <view v-if="shouldShowTime(index)" class="chat-time">
           {{ formatMsgTime(msg.timestamp) }}
         </view>
@@ -34,8 +28,8 @@
           <view v-if="msg.role === 'user'" class="avatar user-avatar">我</view>
         </view>
       </view>
-
-      <view v-if="loading" id="loading-row" class="msg-row ai-row">
+      
+      <view v-if="loading" class="msg-row ai-row">
         <view class="avatar ai-avatar">助</view>
         <view class="msg-box ai-msg">
           <view class="loading-dots">
@@ -50,14 +44,11 @@
     </scroll-view>
 
     <view class="input-panel">
-      <view class="voice-btn">🎤</view>
       <input 
         class="chat-input" 
         placeholder="请输入业务问题..." 
         v-model="inputText"
         @confirm="onSend"
-        @focus="onInputFocus"
-        :adjust-position="false"
       />
       <view 
         :class="['send-btn', inputText.trim() ? '' : 'send-btn-disabled']"
@@ -67,216 +58,165 @@
   </view>
 </template>
 
-<script>
-import { sendKnowledgeQuery } from '@/api/knowledge.js';
+<script setup>
+import { ref, watch, nextTick, onMounted } from 'vue'
 
-export default {
-  data() {
-    return {
-      messages: [
-        {
+const messages = ref([
+  {
+    role: 'ai',
+    content: '您好，我是榕小助。您可以向我询问最新的资费政策、营销方案等业务问题。',
+    showActions: false,
+    timestamp: Date.now()
+  }
+])
+
+const inputText = ref('')
+const loading = ref(false)
+const scrollToId = ref('')
+const pageHeight = ref(0)
+
+onMounted(() => {
+  const systemInfo = uni.getSystemInfoSync()
+  pageHeight.value = systemInfo.windowHeight
+})
+
+watch(messages, () => {
+  nextTick(() => {
+    setTimeout(() => {
+      scrollToBottom()
+    }, 100)
+  })
+}, { deep: true })
+
+function scrollToBottom() {
+  scrollToId.value = 'scroll-bottom-anchor'
+  setTimeout(() => {
+    scrollToId.value = ''
+  }, 300)
+}
+
+function shouldShowTime(index) {
+  if (index === 0) return true
+  
+  const currentTime = messages.value[index].timestamp
+  const prevTime = messages.value[index - 1].timestamp
+  
+  const diffMinutes = (currentTime - prevTime) / 1000 / 60
+  
+  if (diffMinutes >= 5) return true
+  
+  const currentDate = new Date(currentTime).toDateString()
+  const prevDate = new Date(prevTime).toDateString()
+  
+  return currentDate !== prevDate
+}
+
+function formatMsgTime(timestamp) {
+  const date = new Date(timestamp)
+  const now = new Date()
+  
+  const todayStr = now.toDateString()
+  const msgDateStr = date.toDateString()
+  
+  if (todayStr === msgDateStr) {
+    const hours = String(date.getHours()).padStart(2, '0')
+    const minutes = String(date.getMinutes()).padStart(2, '0')
+    return `${hours}:${minutes}`
+  } else {
+    const month = String(date.getMonth() + 1).padStart(2, '0')
+    const day = String(date.getDate()).padStart(2, '0')
+    const hours = String(date.getHours()).padStart(2, '0')
+    const minutes = String(date.getMinutes()).padStart(2, '0')
+    return `${month}-${day} ${hours}:${minutes}`
+  }
+}
+
+function onSend() {
+  const text = inputText.value.trim()
+  if (!text || loading.value) return
+  
+  inputText.value = ''
+  loading.value = true
+  
+  messages.value.push({
+    role: 'user',
+    content: text,
+    showActions: false,
+    timestamp: Date.now()
+  })
+  
+  nextTick(() => {
+    setTimeout(() => {
+      scrollToBottom()
+    }, 100)
+  })
+  
+  uni.request({
+    url: '/api/knowledge',
+    method: 'POST',
+    data: {
+      ques: text,
+      'sys.files': [],
+      'sys.user_id': '',
+      'sys.app_id': '',
+      'sys.workflow_id': '',
+      'sys.workflow_run_id': '',
+      stream: false
+    },
+    header: {
+      'Content-Type': 'application/json'
+    },
+    success: (res) => {
+      loading.value = false
+      
+      if (res.statusCode !== 200) {
+        messages.value.push({
           role: 'ai',
-          content: '您好，我是榕小助。您可以向我询问最新的资费政策、营销方案等业务问题。',
+          content: '服务器返回错误，请稍后重试。',
           showActions: false,
           timestamp: Date.now()
+        })
+        return
+      }
+      
+      let replyContent = '抱歉，我暂时无法回答这个问题。'
+      
+      if (res && res.data) {
+        if (res.data.detail && res.data.detail === 'Not Found') {
+          replyContent = '服务暂时不可用，请稍后重试。'
+        } else if (res.data.content) {
+          replyContent = res.data.content
+        } else if (res.data.msg) {
+          replyContent = res.data.msg
+        } else {
+          replyContent = JSON.stringify(res.data)
         }
-      ],
-      inputText: '',
-      scrollTop: 0,
-      scrollToId: '',
-      loading: false,
-      chatListHeight: 0,
-      windowHeight: 0,
-      keyboardHeight: 0,
-      navbarHeight: 44,
-      inputPanelHeight: 52,
-      scrollTimer: null
-    };
-  },
-  
-  onLoad() {
-    this.initChatHeight();
-    setTimeout(() => {
-      this.scrollToBottom();
-    }, 500);
-  },
-  
-  onShow() {
-    this.initChatHeight();
-    setTimeout(() => {
-      this.scrollToBottom();
-    }, 300);
-  },
-  
-  onUnload() {
-    uni.offKeyboardHeightChange(this.onKeyboardHeightChange);
-    if (this.scrollTimer) {
-      clearTimeout(this.scrollTimer);
-    }
-  },
-  
-  watch: {
-    messages() {
-      this.$nextTick(() => {
-        setTimeout(() => {
-          this.scrollToBottom();
-        }, 100);
-      });
-    }
-  },
-  
-  methods: {
-    initChatHeight() {
-      const systemInfo = uni.getSystemInfoSync();
-      this.windowHeight = systemInfo.windowHeight;
-      const statusBarHeight = systemInfo.statusBarHeight || 0;
-      this.chatListHeight = this.windowHeight - statusBarHeight - this.navbarHeight - this.inputPanelHeight;
-      
-      uni.onKeyboardHeightChange(this.onKeyboardHeightChange);
-    },
-    
-    onKeyboardHeightChange(e) {
-      const systemInfo = uni.getSystemInfoSync();
-      const statusBarHeight = systemInfo.statusBarHeight || 0;
-      this.keyboardHeight = e.height;
-      
-      if (e.height > 0) {
-        this.chatListHeight = this.windowHeight - statusBarHeight - this.navbarHeight - this.inputPanelHeight - e.height;
-        this.safeScrollToBottom();
-      } else {
-        this.chatListHeight = this.windowHeight - statusBarHeight - this.navbarHeight - this.inputPanelHeight;
-        this.safeScrollToBottom();
       }
+      
+      messages.value.push({
+        role: 'ai',
+        content: replyContent,
+        showActions: true,
+        timestamp: Date.now()
+      })
     },
-    
-    safeScrollToBottom() {
-      if (this.scrollTimer) {
-        clearTimeout(this.scrollTimer);
-      }
-      this.scrollTimer = setTimeout(() => {
-        this.scrollToBottom();
-      }, 300);
-    },
-    
-    onInputFocus() {
-      this.safeScrollToBottom();
-    },
-    
-    scrollToBottom() {
-      this.scrollToId = 'scroll-bottom-anchor';
-      setTimeout(() => {
-        this.scrollToId = '';
-      }, 300);
-    },
-    
-    shouldShowTime(index) {
-      if (index === 0) return true;
-      
-      const currentTime = this.messages[index].timestamp;
-      const prevTime = this.messages[index - 1].timestamp;
-      
-      const diffMinutes = (currentTime - prevTime) / 1000 / 60;
-      
-      if (diffMinutes >= 5) return true;
-      
-      const currentDate = new Date(currentTime).toDateString();
-      const prevDate = new Date(prevTime).toDateString();
-      
-      return currentDate !== prevDate;
-    },
-    
-    formatMsgTime(timestamp) {
-      const date = new Date(timestamp);
-      const now = new Date();
-      
-      const todayStr = now.toDateString();
-      const msgDateStr = date.toDateString();
-      
-      if (todayStr === msgDateStr) {
-        const hours = String(date.getHours()).padStart(2, '0');
-        const minutes = String(date.getMinutes()).padStart(2, '0');
-        return `${hours}:${minutes}`;
-      } else {
-        const month = String(date.getMonth() + 1).padStart(2, '0');
-        const day = String(date.getDate()).padStart(2, '0');
-        const hours = String(date.getHours()).padStart(2, '0');
-        const minutes = String(date.getMinutes()).padStart(2, '0');
-        return `${month}-${day} ${hours}:${minutes}`;
-      }
-    },
-    
-    onSend() {
-      const text = this.inputText.trim();
-      if (!text || this.loading) return;
-      
-      this.inputText = '';
-      this.loading = true;
-      
-      this.messages.push({
-        role: 'user',
-        content: text,
+    fail: (err) => {
+      loading.value = false
+      messages.value.push({
+        role: 'ai',
+        content: '网络连接失败，请稍后重试。',
         showActions: false,
         timestamp: Date.now()
-      });
-      
-      this.$nextTick(() => {
-        this.safeScrollToBottom();
-      });
-      
-      sendKnowledgeQuery(text)
-        .then((res) => {
-          this.loading = false;
-          let replyContent = '抱歉，我暂时无法回答这个问题。';
-          
-          if (res && typeof res === 'object') {
-            if (res.content) {
-              replyContent = res.content;
-            } else if (res.data && res.data.content) {
-              replyContent = res.data.content;
-            } else if (res.msg) {
-              replyContent = res.msg;
-            } else {
-              replyContent = JSON.stringify(res);
-            }
-          } else if (typeof res === 'string') {
-            replyContent = res;
-          }
-          
-          this.messages.push({
-            role: 'ai',
-            content: replyContent,
-            showActions: true,
-            timestamp: Date.now()
-          });
-          
-          this.$nextTick(() => {
-            this.safeScrollToBottom();
-          });
-        })
-        .catch((err) => {
-          this.loading = false;
-          console.error('发送消息失败:', err);
-          this.messages.push({
-            role: 'ai',
-            content: '网络连接失败，请稍后重试。',
-            showActions: false,
-            timestamp: Date.now()
-          });
-          
-          this.$nextTick(() => {
-            this.safeScrollToBottom();
-          });
-        });
+      })
     }
-  }
-};
+  })
+}
 </script>
 
 <style scoped>
-.container {
+.chat-page {
   display: flex;
   flex-direction: column;
-  height: 100vh;
   padding-top: var(--status-bar-height);
   box-sizing: border-box;
   background-color: #F5F6F8;
@@ -295,12 +235,13 @@ export default {
   color: #333333;
 }
 .chat-list {
+  flex: 1;
   padding: 16px;
   overflow-y: auto;
   box-sizing: border-box;
 }
 .scroll-bottom-anchor {
-  height: 0px;
+  height: 0;
   width: 100%;
 }
 .chat-time {
@@ -388,21 +329,9 @@ export default {
   display: flex;
   align-items: center;
   padding: 12px 16px;
-  padding-bottom: calc(12px + env(safe-area-inset-bottom));
   background-color: #ffffff;
   border-top: 1px solid #eeeeee;
   box-shadow: 0 -2px 8px rgba(0, 0, 0, 0.03);
-}
-.voice-btn {
-  width: 36px;
-  height: 36px;
-  border-radius: 50%;
-  background-color: #f5f6f8;
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  margin-right: 12px;
-  font-size: 18px;
 }
 .chat-input {
   flex: 1;
@@ -411,7 +340,6 @@ export default {
   border-radius: 18px;
   padding: 0 16px;
   font-size: 14px;
-  border: none;
 }
 .send-btn {
   margin-left: 12px;

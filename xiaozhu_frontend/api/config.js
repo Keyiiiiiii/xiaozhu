@@ -6,14 +6,20 @@ const config = {
     apiToken: "OYECtTTccG1fOzsT6e8EKXR4sOBHJalv"
   },
   visitServer: {
-    //TODO: 后端接口待实现
-    baseUrl: "http://",
-    uploadPath: "/api/visit/upload/"
+    baseUrl: "http://localhost:8001",
+    uploadPath: "/api/file/upload/"
   },
   fileServer: {
-    baseUrl: "http://localhost:8000",
+    //改为后端运行端口
+    baseUrl: "http://localhost:8001",
     uploadPath: "/api/file/upload/",
     speechToTextPath: "/api/file/speech-to-text/"
+  },
+  // TODO: 后端登录认证服务配置
+  authServer: {
+    baseUrl: "http://localhost:8001",
+    loginPath: "/api/auth/login/",
+    logoutPath: "/api/auth/logout/"
   }
 };
 
