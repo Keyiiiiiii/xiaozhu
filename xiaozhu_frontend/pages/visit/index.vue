@@ -99,8 +99,8 @@
         <view class="history-card" v-for="(item, index) in historyList" :key="item.id" @click="goToDetail(item.id)">
           <view class="history-card-head">
             <text class="history-name" @click.stop="openEditNameModal(index)">{{ item.name }}</text>
-            <text class="history-state" :class="item.status === 'done' ? 'state-done' : 'state-processing'">
-              {{ item.status === 'done' ? '已提取' : '处理中' }}
+            <text class="history-state" :class="item.status === 'done' ? 'state-done' : (item.status === 'failed' ? 'state-failed' : 'state-processing')">
+              {{ item.status === 'done' ? '已提取' : (item.status === 'failed' ? '转写失败' : '处理中') }}
             </text>
           </view>
           <view class="history-card-body">
@@ -185,7 +185,8 @@
 import permission from "@/common/permission.js"
 // #endif
 import { getVoiceWsUrl } from "@/api/voice.js";
-import { uploadAudioFile, uploadVisitRecordApi, speechToText } from "@/api/file.js";
+import { uploadAudioFile, submitSpeechToText, connectAsrWebSocket } from "@/api/file.js";
+import { showNotification } from "@/common/notification.js";
 
 const FRAME = { FIRST: 0, CONTINUE: 1, LAST: 2 };
 const APPID = "speechvoice2";
@@ -277,6 +278,8 @@ export default {
       isNewRecord: false,
       isUploading: false,
       uploadProgress: 0,
+      asrWebSocketMap: null,
+      isAsrProcessing: false,
     };
   },
   computed: {
@@ -409,19 +412,14 @@ export default {
         const fileUrl = uploadResult.file_url;
         const recordId = uploadResult.record_id;
 
-        uni.showLoading({
-          title: "正在转写...",
-          mask: true
-        });
-
-        const text = await speechToText(recordId, 1);
-        console.log("转写结果:", text);
+        const sttResult = await submitSpeechToText(recordId, 1);
+        console.log("转写任务已提交:", sttResult);
 
         const duration = await this.getAudioDuration(filePath);
         console.log("音频时长:", duration);
 
         this.savedAudioPath = filePath;
-        this.recognizedText = text || "(未识别到语音内容)";
+        this.recognizedText = "";
         this.hasRecorded = true;
         this.recordDuration = Math.floor(duration);
         this.transcriptCollapsed = false;
@@ -433,27 +431,31 @@ export default {
           visitTime: this.formatDateTime(now),
           duration: Math.floor(duration),
           durationText: this.formatDurationText(Math.floor(duration)),
-          content: this.recognizedText,
+          content: "",
           audioPath: fileUrl,
           recordId: recordId,
           isAudioUploaded: true,
-          createTime: now.getTime()
+          createTime: now.getTime(),
+          jobId: sttResult.job_id
         };
+
+        this.listenForAsrResult(sttResult.job_id, recordId);
 
         this.openMapModal();
 
+        uni.hideLoading();
         uni.showToast({
           title: "上传成功",
           icon: "success"
         });
       } catch (error) {
-        console.error("上传或转写失败:", error);
+        console.error("上传失败:", error);
+        uni.hideLoading();
         uni.showToast({
           title: error.message || "上传失败",
           icon: "none"
         });
       } finally {
-        uni.hideLoading();
         this.isUploading = false;
         this.uploadProgress = 0;
       }
@@ -583,24 +585,24 @@ export default {
           }
         });
         
-        uni.onSocketOpen(() => {
+        this.socketTask.onOpen(() => {
           console.log("WebSocket 连接成功");
           this.socketConnected = true;
           resolve();
         });
         
-        uni.onSocketError((err) => {
+        this.socketTask.onError((err) => {
           console.error("WebSocket 错误:", err);
           if (!this.socketConnected) {
             reject(new Error("WebSocket 连接失败"));
           }
         });
         
-        uni.onSocketMessage((res) => {
+        this.socketTask.onMessage((res) => {
           this.handleMessage(res.data);
         });
         
-        uni.onSocketClose(() => {
+        this.socketTask.onClose(() => {
           console.log("WebSocket 连接关闭");
           this.socketConnected = false;
           this.isRecognizing = false;
@@ -700,8 +702,8 @@ export default {
       // #endif
       
       // #ifndef H5
-      if (this.socketConnected) {
-        uni.sendSocketMessage({
+      if (this.socketConnected && this.socketTask) {
+        this.socketTask.send({
           data: frameStr,
           fail: (err) => {
             console.error("发送 WebSocket 消息失败:", err);
@@ -901,7 +903,7 @@ export default {
       
       setTimeout(() => {
         if (this.socketTask) {
-          uni.closeSocket();
+          this.socketTask.close();
           this.socketTask = null;
         }
       }, sendLastFrame ? 1800 : 0);
@@ -1219,6 +1221,7 @@ export default {
 
         let finalAudioUrl = audioPath;
         let serverRecordId = this.pendingRecord.recordId || null;
+        let jobId = this.pendingRecord.jobId || null;
 
         if (!isAudioUploaded) {
           const visitDate = this.pendingRecord.visitTime
@@ -1232,23 +1235,13 @@ export default {
             status: 1
           };
 
-          const res = await uploadVisitRecordApi(audioPath, formData, this.savedAudioFile);
+          const res = await uploadAudioFile(audioPath, formData, this.savedAudioFile);
           console.log("走访记录上传成功:", res);
           finalAudioUrl = res.file_url || audioPath;
           serverRecordId = res.record_id;
-        }
 
-        if (serverRecordId && !this.pendingRecord.content) {
-          uni.showLoading({
-            title: "正在转写...",
-            mask: true
-          });
-          try {
-            const text = await speechToText(serverRecordId, 1);
-            this.recognizedText = text || "(未识别到语音内容)";
-          } catch (sttError) {
-            console.warn("语音转文字失败，使用本地识别结果:", sttError);
-          }
+          const sttResult = await submitSpeechToText(serverRecordId, 1);
+          jobId = sttResult.job_id;
         }
 
         const record = {
@@ -1259,11 +1252,16 @@ export default {
           audioPath: finalAudioUrl,
           recordId: serverRecordId,
           content: this.recognizedText || this.pendingRecord.content,
-          status: "processing"
+          status: "processing",
+          jobId: jobId
         };
 
         this.historyList.unshift(record);
         this.saveHistoryToStorage();
+
+        if (jobId && serverRecordId && !this.pendingRecord.content) {
+          this.listenForAsrResult(jobId, serverRecordId, record.id);
+        }
 
         this.showMapModal = false;
         this.mapContext = null;
@@ -1400,6 +1398,151 @@ export default {
       this.transcriptCollapsed = false;
     },
     
+    listenForAsrResult(jobId, recordId, localRecordId) {
+      if (!jobId) {
+        return;
+      }
+
+      const existingWs = this.asrWebSocketMap && this.asrWebSocketMap[jobId];
+      if (existingWs) {
+        return;
+      }
+
+      this.isAsrProcessing = true;
+
+      if (!this.asrWebSocketMap) {
+        this.asrWebSocketMap = {};
+      }
+
+      const ws = connectAsrWebSocket(jobId, {
+        onMessage: (data) => {
+          console.log("ASR WebSocket 消息:", data);
+          if (data.status === "success") {
+            const segments = (data.data && data.data.segments) || [];
+            const text = segments.map(s => s.text || "").join("");
+            this.handleAsrSuccess(jobId, recordId, localRecordId, text);
+          } else if (data.status === "error") {
+            console.warn("ASR 转写失败:", data.message);
+            this.handleAsrError(jobId, recordId, localRecordId, data.message);
+          }
+        },
+        onError: (error) => {
+          console.error("ASR WebSocket 错误:", error);
+          this.cleanupAsrWebSocket(jobId);
+        },
+        onClose: () => {
+          this.cleanupAsrWebSocket(jobId);
+        }
+      });
+
+      this.asrWebSocketMap[jobId] = ws;
+    },
+
+    handleAsrSuccess(jobId, recordId, localRecordId, text) {
+      console.log("转写完成:", text);
+
+      let recordName = "走访记录";
+      let updated = false;
+
+      if (localRecordId) {
+        const index = this.historyList.findIndex(item => item.id === localRecordId);
+        if (index !== -1) {
+          recordName = this.historyList[index].name || recordName;
+          this.historyList[index].content = text || "(未识别到语音内容)";
+          this.historyList[index].status = "done";
+          updated = true;
+        }
+      }
+
+      if (!updated && recordId) {
+        const index = this.historyList.findIndex(item => item.recordId === recordId);
+        if (index !== -1) {
+          recordName = this.historyList[index].name || recordName;
+          this.historyList[index].content = text || "(未识别到语音内容)";
+          this.historyList[index].status = "done";
+          updated = true;
+        }
+      }
+
+      if (updated) {
+        this.saveHistoryToStorage();
+      }
+
+      showNotification("转写完成", `${recordName} 的语音转写已完成`);
+      this.cleanupAsrWebSocket(jobId);
+    },
+
+    handleAsrError(jobId, recordId, localRecordId, errorMessage) {
+      console.warn("转写失败:", errorMessage);
+
+      let recordName = "走访记录";
+
+      if (localRecordId) {
+        const index = this.historyList.findIndex(item => item.id === localRecordId);
+        if (index !== -1) {
+          recordName = this.historyList[index].name || recordName;
+          this.historyList[index].status = "failed";
+        }
+      }
+
+      if (recordId) {
+        const index = this.historyList.findIndex(item => item.recordId === recordId);
+        if (index !== -1) {
+          recordName = this.historyList[index].name || recordName;
+          this.historyList[index].status = "failed";
+        }
+      }
+
+      this.saveHistoryToStorage();
+      showNotification("转写失败", `${recordName} 的语音转写失败: ${errorMessage || "未知错误"}`);
+      this.cleanupAsrWebSocket(jobId);
+    },
+
+    cleanupAsrWebSocket(jobId) {
+      if (this.asrWebSocketMap && this.asrWebSocketMap[jobId]) {
+        try {
+          this.asrWebSocketMap[jobId].close();
+        } catch (e) {
+          console.error("关闭 ASR WebSocket 失败:", e);
+        }
+        delete this.asrWebSocketMap[jobId];
+      }
+
+      if (this.asrWebSocketMap && Object.keys(this.asrWebSocketMap).length === 0) {
+        this.isAsrProcessing = false;
+      }
+    },
+
+    resumePendingAsrTasks() {
+      if (!this.historyList || this.historyList.length === 0) {
+        return;
+      }
+
+      const pendingRecords = this.historyList.filter(item => 
+        item.status === "processing" && item.jobId && item.recordId
+      );
+
+      console.log("恢复待处理的转写任务:", pendingRecords.length);
+
+      pendingRecords.forEach(record => {
+        this.listenForAsrResult(record.jobId, record.recordId, record.id);
+      });
+    },
+
+    closeAsrWebSocket() {
+      if (this.asrWebSocketMap) {
+        Object.keys(this.asrWebSocketMap).forEach(jobId => {
+          try {
+            this.asrWebSocketMap[jobId].close();
+          } catch (e) {
+            console.error("关闭 ASR WebSocket 失败:", e);
+          }
+        });
+        this.asrWebSocketMap = {};
+      }
+      this.isAsrProcessing = false;
+    },
+
     cleanupRecording() {
       this.isRecording = false;
       this.isRecognizing = false;
@@ -1432,7 +1575,7 @@ export default {
       
       // #ifndef H5
       if (this.socketTask) {
-        uni.closeSocket();
+        this.socketTask.close();
         this.socketTask = null;
       }
       // #endif
@@ -1440,8 +1583,10 @@ export default {
   },
   onLoad() {
     this.loadHistoryFromStorage();
+    this.resumePendingAsrTasks();
   },
   beforeDestroy() {
+    this.closeAsrWebSocket();
     this.cleanupRecording();
   },
 };
@@ -1954,6 +2099,10 @@ export default {
 .state-done {
   background-color: #F6FFED;
   color: #52C41A;
+}
+.state-failed {
+  background-color: #FFF1F0;
+  color: #FF4D4F;
 }
 .state-processing {
   background-color: #FFF7E6;

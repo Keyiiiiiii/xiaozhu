@@ -68,7 +68,7 @@
 </template>
 
 <script>
-const STORAGE_KEY = 'notification_settings';
+import { getNotificationSettings, saveNotificationSettings } from "@/common/notification.js";
 
 export default {
   data() {
@@ -86,15 +86,13 @@ export default {
       uni.navigateBack();
     },
     loadSettings() {
-      const saved = uni.getStorageSync(STORAGE_KEY);
-      if (saved) {
-        this.notificationEnabled = saved.notificationEnabled !== undefined ? saved.notificationEnabled : true;
-        this.soundEnabled = saved.soundEnabled !== undefined ? saved.soundEnabled : true;
-        this.vibrateEnabled = saved.vibrateEnabled !== undefined ? saved.vibrateEnabled : true;
-      }
+      const saved = getNotificationSettings();
+      this.notificationEnabled = saved.notificationEnabled;
+      this.soundEnabled = saved.soundEnabled;
+      this.vibrateEnabled = saved.vibrateEnabled;
     },
     saveSettings() {
-      uni.setStorageSync(STORAGE_KEY, {
+      saveNotificationSettings({
         notificationEnabled: this.notificationEnabled,
         soundEnabled: this.soundEnabled,
         vibrateEnabled: this.vibrateEnabled

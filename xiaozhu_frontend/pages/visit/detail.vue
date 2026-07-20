@@ -27,8 +27,8 @@
         <view class="info-divider"></view>
         <view class="info-row">
           <text class="info-label">处理状态</text>
-          <text class="info-value status-tag" :class="record.status === 'done' ? 'tag-done' : 'tag-processing'">
-            {{ record.status === 'done' ? '已提取' : '处理中' }}
+          <text class="info-value status-tag" :class="record.status === 'done' ? 'tag-done' : (record.status === 'failed' ? 'tag-failed' : 'tag-processing')">
+            {{ record.status === 'done' ? '已提取' : (record.status === 'failed' ? '转写失败' : '处理中') }}
           </text>
         </view>
       </view>
@@ -257,6 +257,11 @@ export default {
 .tag-done {
   background-color: #F6FFED;
   color: #52C41A;
+}
+
+.tag-failed {
+  background-color: #FFF1F0;
+  color: #FF4D4F;
 }
 
 .tag-processing {
