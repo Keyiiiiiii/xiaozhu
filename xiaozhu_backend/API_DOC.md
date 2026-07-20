@@ -1,5 +1,8 @@
 # 榕小助后端 API 接口文档
 
+语音转文字后端，本地mysql需要在api_user表里先手动插入一条数据，设置id为1，其余随便
+
+
 ### 配置路径 xiaozhu/xiaozhu_backend/xiaozhu_backend/settings.py
 ```bash
 # mac 启动流程：

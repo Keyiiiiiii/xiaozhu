@@ -27,6 +27,7 @@ COLLATE utf8mb4_unicode_ci;
 ```
 
 ### 4. 配置本地环境变量
+修改/xiaozhu_backend/xiaozhu_backend/settings.py文件line92，改为你自己的mysql密码
 
 在 xiaozhu_backend下，找到提供的模板文件 .env.example，将该文件复制一份，并重命名为 .env，将其中的参数修改为你个人的本地 MySQL 配置：
 
@@ -48,6 +49,10 @@ python manage.py migrate
 
 ```bash
 python manage.py runserver
+```
+语音转文字后端用下面命令启动：
+```bash
+daphne xiaozhu_backend.asgi:application -b 0.0.0.0 -p 8000
 ```
 
 ### 7.创建管理员账号
