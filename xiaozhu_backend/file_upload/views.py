@@ -1,6 +1,7 @@
 import uuid
 import os
 import time
+import threading
 import requests
 from io import BytesIO
 from datetime import datetime
@@ -8,6 +9,9 @@ from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
 from django.conf import settings
+from django.db import close_old_connections
+from channels.layers import get_channel_layer
+from asgiref.sync import async_to_sync
 from .minio_client import upload_file_to_minio, get_file_from_minio
 from api.models import VisitRecord, User
 
@@ -102,6 +106,104 @@ def upload_file(request):
         }, status=500)
 
 
+def poll_asr_job(job_id, record_id, headers):
+    max_poll_count = 120
+    poll_count = 0
+
+    try:
+        while poll_count < max_poll_count:
+            poll_count += 1
+            time.sleep(5)
+            response = requests.get(
+                f"{settings.ASR_API_URL}/{job_id}",
+                headers=headers,
+                timeout=30
+            )
+            response.raise_for_status()
+            job = response.json()
+            print(job["status"])
+
+            if job["status"] == "done":
+                requests.delete(
+                    f"{settings.ASR_API_URL}/{job_id}",
+                    headers=headers,
+                    timeout=30
+                )
+
+                visit_record = VisitRecord.objects.get(id=record_id)
+                visit_record.original_text = job.get("segments", "")
+                visit_record.status = "success"
+                visit_record.save()
+
+                channel_layer = get_channel_layer()
+                async_to_sync(channel_layer.group_send)(
+                    f"asr_{job_id}",
+                    {
+                        "type": "asr_result",
+                        "message": {
+                            "status": "success",
+                            "data": job
+                        }
+                    }
+                )
+                break
+
+            if job["status"] == "failed":
+                visit_record = VisitRecord.objects.get(id=record_id)
+                visit_record.status = "failed"
+                visit_record.save()
+
+                channel_layer = get_channel_layer()
+                async_to_sync(channel_layer.group_send)(
+                    f"asr_{job_id}",
+                    {
+                        "type": "asr_result",
+                        "message": {
+                            "status": "error",
+                            "message": f"转写失败: {job}"
+                        }
+                    }
+                )
+                break
+        else:
+            visit_record = VisitRecord.objects.get(id=record_id)
+            visit_record.status = "failed"
+            visit_record.save()
+
+            channel_layer = get_channel_layer()
+            async_to_sync(channel_layer.group_send)(
+                f"asr_{job_id}",
+                {
+                    "type": "asr_result",
+                    "message": {
+                        "status": "error",
+                        "message": f"转写超时: 超过 {max_poll_count * 5} 秒"
+                    }
+                }
+            )
+    except Exception as e:
+        try:
+            visit_record = VisitRecord.objects.get(id=record_id)
+            visit_record.status = "failed"
+            visit_record.save()
+        except VisitRecord.DoesNotExist:
+            pass
+
+        channel_layer = get_channel_layer()
+        async_to_sync(channel_layer.group_send)(
+            f"asr_{job_id}",
+            {
+                "type": "asr_result",
+                "message": {
+                    "status": "error",
+                    "message": f"调用语音转文字API失败: {str(e)}"
+                }
+            }
+        )
+    finally:
+        close_old_connections()
+
+
 @csrf_exempt
 @require_POST
 def speech_to_text(request):
@@ -154,42 +256,19 @@ def speech_to_text(request):
         visit_record.status = "processing"
         visit_record.save()
 
-        while True:
-            time.sleep(5)
-            response = requests.get(
-                f"{settings.ASR_API_URL}/{job_id}",
-                headers=headers,
-                timeout=30
-            )
-            response.raise_for_status()
-            job = response.json()
-            print(job["status"])
-            if job["status"] == "done":
-                break
-            if job["status"] == "failed":
-                visit_record.status = "failed"
-                visit_record.save()
-                raise RuntimeError(f"转写失败: {job}")
-
-        requests.delete(
-            f"{settings.ASR_API_URL}/{job_id}",
-            headers=headers,
-            timeout=30
+        thread = threading.Thread(
+            target=poll_asr_job,
+            args=(job_id, record_id, headers),
+            daemon=True
         )
-
-        visit_record.original_text = job.get("segments", "")
-        visit_record.status = job.get("status", "")
-        visit_record.save()
+        thread.start()
 
         return JsonResponse({
             "status": "success",
-            "data": job
+            "message": "转写任务已提交",
+            "job_id": job_id,
+            "record_id": record_id
         })
-    except RuntimeError as e:
-        return JsonResponse({
-            "status": "error",
-            "message": str(e)
-        }, status=500)
     except requests.exceptions.RequestException as e:
         return JsonResponse({
             "status": "error",
