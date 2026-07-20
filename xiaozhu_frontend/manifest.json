@@ -157,11 +157,8 @@
         "devServer" : {
             "proxy" : {
                 "/api/knowledge" : {
-                    "target" : "http://36.212.132.154:30086/berry-apps/server/apps/GtjGSJ2V4rrQP-rg457sbi3BDJM7vyDv",
-                    "changeOrigin" : true,
-                    "pathRewrite" : {
-                        "^/api/knowledge" : ""
-                    }
+                    "target" : "http://127.0.0.1:8000",
+                    "changeOrigin" : true
                 }
             }
         },

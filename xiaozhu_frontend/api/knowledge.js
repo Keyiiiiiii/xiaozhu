@@ -1,9 +1,8 @@
 const baseUrl = '/api/knowledge';
-const apiPath = '/api';
 
 export function sendKnowledgeQuery(question) {
   return new Promise((resolve, reject) => {
-    const url = `${baseUrl}${apiPath}?streaming=true`;
+    const url = `${baseUrl}?streaming=true`;
     
     const requestData = {
       ques: question,
