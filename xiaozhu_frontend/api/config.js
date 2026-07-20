@@ -14,6 +14,12 @@ const config = {
     baseUrl: "http://localhost:8001",
     uploadPath: "/api/file/upload/",
     speechToTextPath: "/api/file/speech-to-text/"
+  },
+  // TODO: 后端登录认证服务配置
+  authServer: {
+    baseUrl: "http://localhost:8001",
+    loginPath: "/api/auth/login/",
+    logoutPath: "/api/auth/logout/"
   }
 };
 

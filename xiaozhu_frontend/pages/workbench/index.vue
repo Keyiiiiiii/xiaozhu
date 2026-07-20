@@ -5,7 +5,7 @@
       <view class="header-bg-shape"></view>
       <view class="header-content">
         <view class="header-left">
-          <text class="greeting">您好，张三</text>
+          <text class="greeting">您好，{{ userName }}</text>
           <text class="date">2026-06-02 星期二</text>
         </view>
         <view class="header-right">
@@ -80,9 +80,17 @@
 </template>
 
 <script>
+import { mapState } from 'vuex';
+
 export default {
   data() {
     return {};
+  },
+  computed: {
+    ...mapState(['userInfo']),
+    userName() {
+      return this.userInfo ? this.userInfo.name : '用户';
+    }
   },
   methods: {
     goToVisit() {

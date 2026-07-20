@@ -2,14 +2,14 @@
   <view class="container">
     <!-- 个人信息头部 -->
     <view class="profile-header">
-      <view class="avatar">张</view>
+      <view class="avatar">{{ userInfo ? userInfo.name.charAt(0) : '用' }}</view>
       <view class="profile-info">
         <view class="profile-name">
-          <text class="name-text">张三</text>
-          <text class="role-badge">客户经理</text>
+          <text class="name-text">{{ userInfo ? userInfo.name : '未登录' }}</text>
+          <text class="role-badge" v-if="userInfo">{{ userInfo.role }}</text>
         </view>
-        <text class="profile-dept">市公司 / 政企客户部 / 第一网格</text>
-        <text class="profile-id">工号：FZ10086</text>
+        <text class="profile-dept" v-if="userInfo">{{ userInfo.dept }}</text>
+        <text class="profile-id" v-if="userInfo">工号：{{ userInfo.empId }}</text>
       </view>
     </view>
 
@@ -64,16 +64,41 @@
 
     <!-- 退出登录 -->
     <view class="logout-panel">
-      <view class="logout-btn">退出当前账号</view>
+      <view class="logout-btn" @click="handleLogout">退出当前账号</view>
     </view>
   </view>
 </template>
 
 <script>
+import { mapState, mapMutations } from 'vuex';
+import loginApi from '@/api/login.js';
+
 export default {
   data() {
     return {};
   },
+  computed: {
+    ...mapState(['userInfo'])
+  },
+  methods: {
+    ...mapMutations(['logout']),
+    handleLogout() {
+      uni.showModal({
+        title: '提示',
+        content: '确定要退出登录吗？',
+        success: (res) => {
+          if (res.confirm) {
+            loginApi.logout().finally(() => {
+              this.logout();
+              uni.reLaunch({
+                url: '/pages/login/index'
+              });
+            });
+          }
+        }
+      });
+    }
+  }
 };
 </script>
 
