@@ -169,10 +169,12 @@ function onSend() {
     success: (res) => {
       loading.value = false
       
+      console.log('API响应:', res)
+      
       if (res.statusCode !== 200) {
         messages.value.push({
           role: 'ai',
-          content: '服务器返回错误，请稍后重试。',
+          content: `服务器返回错误 ${res.statusCode}，请稍后重试。`,
           showActions: false,
           timestamp: Date.now()
         })
@@ -182,12 +184,12 @@ function onSend() {
       let replyContent = '抱歉，我暂时无法回答这个问题。'
       
       if (res && res.data) {
-        if (res.data.detail && res.data.detail === 'Not Found') {
-          replyContent = '服务暂时不可用，请稍后重试。'
-        } else if (res.data.content) {
+        if (res.data.content) {
           replyContent = res.data.content
         } else if (res.data.msg) {
           replyContent = res.data.msg
+        } else if (typeof res.data === 'string') {
+          replyContent = res.data
         } else {
           replyContent = JSON.stringify(res.data)
         }

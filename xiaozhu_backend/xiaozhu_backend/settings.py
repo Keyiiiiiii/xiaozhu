@@ -45,7 +45,8 @@ INSTALLED_APPS = [
     "django.contrib.messages",
     "django.contrib.staticfiles",
     "file_upload",
-    "api"
+    "api",
+    "knowledge"
 ]
 
 MIDDLEWARE = [
@@ -162,3 +163,5 @@ CHANNEL_LAYERS = {
         },
     },
 }
+KNOWLEDGE_API_URL = "http://36.212.132.154:30086/berry-apps/server/apps/api"
+KNOWLEDGE_API_KEY = "GtjGSJ2V4rrQP-rg457sbi3BDJM7vyDv"
