@@ -336,3 +336,61 @@ def summarize_record(request):
             "status": "error",
             "message": f"总结API响应格式错误: {str(e)}"
         }, status=500)
+
+
+@csrf_exempt
+@require_POST
+def get_record_ids(request):
+    creator_id = int(request.POST.get("creator_id", 0))
+
+    if not creator_id:
+        return JsonResponse({
+            "status": "error",
+            "message": "creator_id 不能为空"
+        }, status=400)
+
+    records = VisitRecord.objects.filter(creator_id=creator_id)
+    record_ids = [record.id for record in records]
+
+    return JsonResponse({
+        "status": "success",
+        "message": "获取成功",
+        "record_ids": record_ids
+    })
+
+
+@csrf_exempt
+@require_POST
+def get_record_detail(request):
+    creator_id = int(request.POST.get("creator_id", 0))
+    record_id = int(request.POST.get("id", 0))
+
+    if not creator_id or not record_id:
+        return JsonResponse({
+            "status": "error",
+            "message": "creator_id 和 id 不能为空"
+        }, status=400)
+
+    try:
+        visit_record = VisitRecord.objects.get(id=record_id, creator_id=creator_id)
+    except VisitRecord.DoesNotExist:
+        return JsonResponse({
+            "status": "error",
+            "message": f"走访记录 ID={record_id}, creator_id={creator_id} 不存在"
+        }, status=400)
+
+    return JsonResponse({
+        "status": "success",
+        "message": "获取成功",
+        "data": {
+            "id": visit_record.id,
+            "creator_id": visit_record.creator_id,
+            "customer_name": visit_record.customer_name,
+            "audio_url": visit_record.audio_url,
+            "original_text": visit_record.original_text,
+            "ai_summary": visit_record.ai_summary,
+            "visit_time": visit_record.visit_time.isoformat() if visit_record.visit_time else None,
+            "business_type": visit_record.business_type,
+            "status": visit_record.status
+        }
+    })

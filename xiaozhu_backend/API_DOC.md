@@ -28,6 +28,12 @@ curl -X POST http://localhost:8000/api/file/upload/ \
 curl -X POST http://localhost:8000/api/file/speech-to-text/ -d "creator_id=1" -d "id=1"
 
 curl -X POST http://localhost:8000/api/file/summarize/ -d "creator_id=1" -d "id=1"
+
+curl -X POST http://localhost:8000/api/file/record-ids/ -d "creator_id=1"
+
+curl -X POST http://localhost:8000/api/file/record-detail/ \
+  -d "creator_id=1" \
+  -d "id=1"
 # 5、WebSocket连接获取转写结果：
 ws://localhost:8000/ws/asr/{job_id}/
 ```
@@ -444,6 +450,123 @@ curl -X POST http://localhost:8000/api/file/summarize/ \
 
 ---
 
+## 5. 获取记录ID列表接口
+
+### 接口描述
+
+根据 `creator_id` 从数据库 `api_visitrecord` 表中获取该用户下所有走访记录的 ID 列表。
+
+### 请求信息
+
+- **URL**: `POST /api/file/record-ids/`
+- **Method**: `POST`
+
+### 请求参数
+
+| 参数名 | 类型 | 必填 | 默认值 | 说明 |
+| :--- | :--- | :--- | :--- | :--- |
+| `creator_id` | Integer | 是 | - | 创建人ID，需对应 `api_user` 表中存在的用户 |
+
+### 成功响应
+
+**Status Code**: `200 OK`
+
+```json
+{
+    "status": "success",
+    "message": "获取成功",
+    "record_ids": [1, 2, 3, 4, 5]
+}
+```
+
+### 失败响应
+
+**Status Code**: `400 Bad Request`
+
+```json
+{
+    "status": "error",
+    "message": "creator_id 不能为空"
+}
+```
+
+### 示例请求
+
+```bash
+curl -X POST http://localhost:8000/api/file/record-ids/ \
+  -d "creator_id=1"
+```
+
+---
+
+## 6. 获取记录详情接口
+
+### 接口描述
+
+根据 `creator_id` 和 `id` 从数据库 `api_visitrecord` 表中获取完整的走访记录信息。
+
+### 请求信息
+
+- **URL**: `POST /api/file/record-detail/`
+- **Method**: `POST`
+
+### 请求参数
+
+| 参数名 | 类型 | 必填 | 默认值 | 说明 |
+| :--- | :--- | :--- | :--- | :--- |
+| `creator_id` | Integer | 是 | - | 创建人ID，需对应 `api_user` 表中存在的用户 |
+| `id` | Integer | 是 | - | 走访记录ID，需对应 `api_visitrecord` 表中存在的记录 |
+
+### 成功响应
+
+**Status Code**: `200 OK`
+
+```json
+{
+    "status": "success",
+    "message": "获取成功",
+    "data": {
+        "id": 1,
+        "creator_id": 1,
+        "customer_name": "张三",
+        "audio_url": "http://localhost:9000/xiaozhu/xxx.m4a",
+        "original_text": "[{'start': 0.0, 'end': 2.58, 'text': '你好...', ...}]",
+        "ai_summary": "总结内容...",
+        "visit_time": "2026-07-20T10:30:00",
+        "business_type": null,
+        "status": "success"
+    }
+}
+```
+
+### 失败响应
+
+**Status Code**: `400 Bad Request`
+
+```json
+{
+    "status": "error",
+    "message": "creator_id 和 id 不能为空"
+}
+```
+
+```json
+{
+    "status": "error",
+    "message": "走访记录 ID=1, creator_id=1 不存在"
+}
+```
+
+### 示例请求
+
+```bash
+curl -X POST http://localhost:8000/api/file/record-detail/ \
+  -d "creator_id=1" \
+  -d "id=1"
+```
+
+---
+
 ## 接口调用流程
 
 ```
@@ -608,6 +731,53 @@ curl -X POST http://localhost:8000/api/file/summarize/ \
     "message": "总结成功",
     "ai_summary": "总结内容...",
     "record_id": 1
+}
+```
+
+#### 步骤5: 获取记录ID列表
+
+获取指定用户下所有走访记录的 ID 列表：
+
+```bash
+curl -X POST http://localhost:8000/api/file/record-ids/ \
+  -d "creator_id=1"
+```
+
+预期响应:
+```json
+{
+    "status": "success",
+    "message": "获取成功",
+    "record_ids": [1, 2, 3]
+}
+```
+
+#### 步骤6: 获取记录详情
+
+根据记录 ID 获取完整的走访记录信息：
+
+```bash
+curl -X POST http://localhost:8000/api/file/record-detail/ \
+  -d "creator_id=1" \
+  -d "id=1"
+```
+
+预期响应:
+```json
+{
+    "status": "success",
+    "message": "获取成功",
+    "data": {
+        "id": 1,
+        "creator_id": 1,
+        "customer_name": "张三",
+        "audio_url": "http://localhost:9000/xiaozhu/xxx.m4a",
+        "original_text": "[{'start': 0.0, 'end': 2.58, 'text': '你好...', ...}]",
+        "ai_summary": "总结内容...",
+        "visit_time": "2026-07-20T10:30:00",
+        "business_type": null,
+        "status": "success"
+    }
 }
 ```
 
