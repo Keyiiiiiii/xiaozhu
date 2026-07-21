@@ -21,6 +21,5 @@ from knowledge import views as knowledge_views
 urlpatterns = [
     path("admin/", admin.site.urls),
     path("api/file/", include("file_upload.urls")),
-    path("api/knowledge", knowledge_views.knowledge_api),
-    path("api/knowledge/", knowledge_views.knowledge_api),
+    path("api/knowledge/", include("knowledge.urls")),
 ]
