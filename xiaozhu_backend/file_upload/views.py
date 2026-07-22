@@ -297,14 +297,14 @@ def summarize_record(request):
         }, status=400)
 
     original_text = visit_record.original_text
-    if not original_text or not original_text.strip():
+    if not original_text:
         return JsonResponse({
             "status": "error",
             "message": "原始转写文本为空，无法进行总结"
         }, status=400)
 
     try:
-        response = call_llm_api(API_URL, API_KEY, original_text, str(creator_id), False)
+        response = call_llm_api(API_URL, API_KEY, original_text['segments'], str(creator_id), False)
 
         if isinstance(response, str):
             return JsonResponse({
