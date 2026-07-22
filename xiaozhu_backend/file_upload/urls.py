@@ -7,4 +7,5 @@ urlpatterns = [
     path("summarize/", views.summarize_record, name="summarize_record"),
     path("record-ids/", views.get_record_ids, name="get_record_ids"),
     path("record-detail/", views.get_record_detail, name="get_record_detail"),
+    path("update-original-text/", views.update_original_text, name="update_original_text"),
 ]

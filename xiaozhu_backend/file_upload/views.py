@@ -394,3 +394,40 @@ def get_record_detail(request):
             "status": visit_record.status
         }
     })
+
+
+@csrf_exempt
+@require_POST
+def update_original_text(request):
+    creator_id = int(request.POST.get("creator_id", 0))
+    record_id = int(request.POST.get("id", 0))
+    original_text = request.POST.get("original_text", "")
+
+    if not creator_id or not record_id:
+        return JsonResponse({
+            "status": "error",
+            "message": "creator_id 和 id 不能为空"
+        }, status=400)
+
+    if not original_text or not original_text.strip():
+        return JsonResponse({
+            "status": "error",
+            "message": "original_text 不能为空"
+        }, status=400)
+
+    try:
+        visit_record = VisitRecord.objects.get(id=record_id, creator_id=creator_id)
+    except VisitRecord.DoesNotExist:
+        return JsonResponse({
+            "status": "error",
+            "message": f"走访记录 ID={record_id}, creator_id={creator_id} 不存在"
+        }, status=400)
+
+    visit_record.original_text = original_text
+    visit_record.save()
+
+    return JsonResponse({
+        "status": "success",
+        "message": "更新成功",
+        "record_id": record_id
+    })

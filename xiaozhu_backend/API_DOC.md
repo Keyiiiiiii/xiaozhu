@@ -34,6 +34,11 @@ curl -X POST http://localhost:8000/api/file/record-ids/ -d "creator_id=1"
 curl -X POST http://localhost:8000/api/file/record-detail/ \
   -d "creator_id=1" \
   -d "id=1"
+
+curl -X POST http://localhost:8000/api/file/update-original-text/ \
+  -d "creator_id=1" \
+  -d "id=1" \
+  -d "original_text=新的转写文本内容..."
 # 5、WebSocket连接获取转写结果：
 ws://localhost:8000/ws/asr/{job_id}/
 ```
@@ -567,6 +572,81 @@ curl -X POST http://localhost:8000/api/file/record-detail/ \
 
 ---
 
+## 7. 更新录音文本接口
+
+### 接口描述
+
+根据 `creator_id` 和 `id` 更新数据库 `api_visitrecord` 表中对应记录的 `original_text` 字段。
+
+### 请求信息
+
+- **URL**: `POST /api/file/update-original-text/`
+- **Method**: `POST`
+
+### 请求参数
+
+| 参数名 | 类型 | 必填 | 默认值 | 说明 |
+| :--- | :--- | :--- | :--- | :--- |
+| `creator_id` | Integer | 是 | - | 创建人ID，需对应 `api_user` 表中存在的用户 |
+| `id` | Integer | 是 | - | 走访记录ID，需对应 `api_visitrecord` 表中存在的记录 |
+| `original_text` | String | 是 | - | 更新后的录音转写文本内容 |
+
+### 成功响应
+
+**Status Code**: `200 OK`
+
+```json
+{
+    "status": "success",
+    "message": "更新成功",
+    "record_id": 1
+}
+```
+
+### 失败响应
+
+**Status Code**: `400 Bad Request`
+
+```json
+{
+    "status": "error",
+    "message": "creator_id 和 id 不能为空"
+}
+```
+
+```json
+{
+    "status": "error",
+    "message": "original_text 不能为空"
+}
+```
+
+```json
+{
+    "status": "error",
+    "message": "走访记录 ID=1, creator_id=1 不存在"
+}
+```
+
+### 示例请求
+
+```bash
+curl -X POST http://localhost:8000/api/file/update-original-text/ \
+  -d "creator_id=1" \
+  -d "id=1" \
+  -d "original_text=新的转写文本内容..."
+```
+
+### 数据库更新
+
+更新成功后，会更新 `api_visitrecord` 表中对应记录：
+
+| 字段 | 更新逻辑 |
+| :--- | :--- |
+| `original_text` | 更新为传入的录音转写文本内容 |
+
+---
+
 ## 接口调用流程
 
 ```
@@ -778,6 +858,26 @@ curl -X POST http://localhost:8000/api/file/record-detail/ \
         "business_type": null,
         "status": "success"
     }
+}
+```
+
+#### 步骤7: 更新录音文本
+
+更新指定记录的录音转写文本内容：
+
+```bash
+curl -X POST http://localhost:8000/api/file/update-original-text/ \
+  -d "creator_id=1" \
+  -d "id=1" \
+  -d "original_text=新的转写文本内容..."
+```
+
+预期响应:
+```json
+{
+    "status": "success",
+    "message": "更新成功",
+    "record_id": 1
 }
 ```
 
