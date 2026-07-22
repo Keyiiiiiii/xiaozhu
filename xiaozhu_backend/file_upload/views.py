@@ -403,7 +403,8 @@ def get_record_detail(request):
             "visit_time": visit_record.visit_time.isoformat() if visit_record.visit_time else None,
             "duration_seconds": visit_record.duration_seconds,
             "business_type": visit_record.business_type,
-            "status": visit_record.status
+            "status": visit_record.status,
+            "duration_seconds": visit_record.duration_seconds
         }
     })
 
