@@ -81,6 +81,11 @@ class VisitRecord(models.Model):
         auto_now_add=True, 
         verbose_name="走访时间"
     )
+    duration_seconds = models.PositiveIntegerField(
+        null=True,
+        blank=True,
+        verbose_name="沟通时长"
+    )
     business_type = models.CharField(
         null=True, 
         blank=True,
