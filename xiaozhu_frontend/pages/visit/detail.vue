@@ -58,47 +58,50 @@
         <view class="section-header">
           <view class="section-indicator"></view>
           <text class="section-title">录音转写</text>
+          <view class="section-action" v-if="record.content && !isEditing" @click="startEdit">
+            <text class="action-text">编辑</text>
+          </view>
         </view>
         <view class="transcript-content">
-          <text class="transcript-text">{{ record.content || '暂无转写内容' }}</text>
+          <text class="transcript-text" v-if="!isEditing">{{ record.content || '暂无转写内容' }}</text>
+          <textarea
+            class="transcript-textarea"
+            v-else
+            v-model="editedContent"
+            :auto-height="true"
+            placeholder="请输入转写内容"
+            :maxlength="-1"
+          />
+        </view>
+        <view class="edit-btn-row" v-if="isEditing">
+          <button class="cancel-btn" @click="cancelEdit">
+            <text class="cancel-btn-text">取消</text>
+          </button>
+          <button class="save-btn" :disabled="isSaving || !editedContent" @click="saveEdit">
+            <text class="save-btn-text">{{ isSaving ? '保存中...' : '保存' }}</text>
+          </button>
+        </view>
+        <view class="summarize-btn-wrap" v-else>
+          <button class="summarize-btn" :disabled="isSummarizing || !record.content" @click="handleSummarize">
+            <text class="summarize-btn-text">{{ isSummarizing ? 'AI总结中...' : (aiSummary ? '重新生成总结' : '智能总结') }}</text>
+          </button>
         </view>
       </view>
 
-      <view class="section-card">
+      <view class="section-card" v-if="aiSummary || isSummarizing">
         <view class="section-header">
           <view class="section-indicator"></view>
           <text class="section-title">智能总结</text>
         </view>
-        <view class="summary-content" v-if="record.status === 'done'">
+        <view class="summary-content" v-if="aiSummary">
           <view class="summary-block">
-            <text class="summary-label">走访纪要</text>
-            <text class="summary-text">{{ summaryData.meetingSummary }}</text>
-          </view>
-          <view class="summary-block">
-            <text class="summary-label">关键事项</text>
-            <view class="key-points">
-              <view class="key-point-item" v-for="(item, idx) in summaryData.keyPoints" :key="idx">
-                <text class="point-dot">•</text>
-                <text class="point-text">{{ item }}</text>
-              </view>
-            </view>
-          </view>
-          <view class="summary-block">
-            <text class="summary-label">待办事项</text>
-            <view class="todo-list">
-              <view class="todo-item" v-for="(item, idx) in summaryData.todoList" :key="idx">
-                <view class="todo-checkbox">
-                  <text class="todo-check-icon">✓</text>
-                </view>
-                <text class="todo-text">{{ item }}</text>
-              </view>
-            </view>
+            <text class="summary-text">{{ aiSummary }}</text>
           </view>
         </view>
         <view class="processing-wrap" v-else>
           <view class="processing-spinner"></view>
-          <text class="processing-text">总结内容处理中...</text>
-          <text class="processing-desc">AI正在智能分析转写内容，请稍候</text>
+          <text class="processing-text">AI总结中...</text>
+          <text class="processing-desc">正在智能分析转写内容，请稍候</text>
         </view>
       </view>
     </scroll-view>
@@ -106,10 +109,13 @@
 </template>
 
 <script>
+import { summarizeRecording, getRecordDetail, updateOriginalText } from '@/api/file.js';
+
 export default {
   data() {
     return {
       recordId: '',
+      serverRecordId: null,
       record: {
         id: '',
         name: '',
@@ -119,28 +125,20 @@ export default {
         content: '',
         audioPath: '',
         latitude: 0,
-        longitude: 0
+        longitude: 0,
+        originalSegments: null
       },
-      summaryData: {
-        meetingSummary: '本次走访主要讨论了项目推进情况，客户对当前的合作进展表示满意，并提出了一些优化建议。双方就下一阶段的工作计划达成了共识，明确了各自的责任分工和时间节点。',
-        keyPoints: [
-          '客户对产品功能表示认可，希望增加数据导出功能',
-          '下一阶段重点推进系统集成测试',
-          '预计下周三前完成需求确认文档',
-          '客户方对接人为张经理'
-        ],
-        todoList: [
-          '整理本次走访会议纪要并发送给客户',
-          '跟进数据导出功能的排期',
-          '准备下周三的需求确认文档',
-          '同步项目进度给内部团队'
-        ]
-      }
+      isSummarizing: false,
+      aiSummary: '',
+      isEditing: false,
+      editedContent: '',
+      isSaving: false
     };
   },
   onLoad(options) {
     if (options && options.id) {
       this.recordId = options.id;
+      this.serverRecordId = options.recordId ? Number(options.recordId) : null;
       this.loadRecordDetail();
     }
   },
@@ -148,18 +146,171 @@ export default {
     goBack() {
       uni.navigateBack();
     },
-    loadRecordDetail() {
+    async loadRecordDetail() {
       try {
+        if (this.serverRecordId) {
+          const serverRecord = await getRecordDetail(this.serverRecordId, 1);
+          this.record = this.mapServerRecordToLocal(serverRecord);
+          this.aiSummary = serverRecord.ai_summary || '';
+          return;
+        }
         const historyData = uni.getStorageSync('visit_history');
         if (historyData) {
           const list = JSON.parse(historyData);
           const found = list.find(item => item.id === this.recordId);
           if (found) {
             this.record = found;
+            this.aiSummary = found.aiSummary || '';
           }
         }
       } catch (e) {
         console.error('加载走访详情失败:', e);
+      }
+    },
+    mapServerRecordToLocal(serverRecord) {
+      let content = "";
+      let originalSegments = null;
+      if (serverRecord.original_text) {
+        let segments = serverRecord.original_text;
+        if (typeof segments === 'string') {
+          try {
+            segments = JSON.parse(segments);
+          } catch (e) {
+            segments = null;
+            content = serverRecord.original_text;
+          }
+        }
+        if (Array.isArray(segments)) {
+          originalSegments = segments;
+          content = segments.map(s => s.text || "").join("");
+        } else if (!content && typeof segments === 'string') {
+          content = segments;
+        }
+      }
+
+      let status = "processing";
+      if (serverRecord.status === "success") {
+        status = "done";
+      } else if (serverRecord.status === "failed" || serverRecord.status === "error") {
+        status = "failed";
+      }
+
+      let visitTime = "";
+      if (serverRecord.visit_time) {
+        const d = new Date(serverRecord.visit_time);
+        if (!isNaN(d.getTime())) {
+          const year = d.getFullYear();
+          const month = String(d.getMonth() + 1).padStart(2, '0');
+          const day = String(d.getDate()).padStart(2, '0');
+          const hour = String(d.getHours()).padStart(2, '0');
+          const minute = String(d.getMinutes()).padStart(2, '0');
+          visitTime = `${year}-${month}-${day} ${hour}:${minute}`;
+        }
+      }
+
+      const duration = serverRecord.duration_seconds || 0;
+      let durationText = "--";
+      if (duration > 0) {
+        const mins = Math.floor(duration / 60);
+        const secs = duration % 60;
+        if (mins === 0) {
+          durationText = `${secs}秒`;
+        } else {
+          durationText = `${mins}分${secs}秒`;
+        }
+      }
+
+      return {
+        id: "record_" + serverRecord.id,
+        recordId: serverRecord.id,
+        name: serverRecord.customer_name || "走访记录",
+        status: status,
+        visitTime: visitTime,
+        duration: duration,
+        durationText: durationText,
+        content: content,
+        audioPath: serverRecord.audio_url || "",
+        latitude: 0,
+        longitude: 0,
+        originalSegments: originalSegments
+      };
+    },
+    async handleSummarize() {
+      if (this.isSummarizing || !this.record.content) {
+        return;
+      }
+      this.isSummarizing = true;
+      this.aiSummary = '';
+      try {
+        const result = await summarizeRecording(this.serverRecordId || this.record.recordId, 1);
+        this.aiSummary = result.aiSummary || '';
+        uni.showToast({
+          title: '总结成功',
+          icon: 'success'
+        });
+      } catch (e) {
+        console.error('智能总结失败:', e);
+        uni.showToast({
+          title: e.message || '总结失败',
+          icon: 'none'
+        });
+      } finally {
+        this.isSummarizing = false;
+      }
+    },
+    startEdit() {
+      this.editedContent = this.record.content || '';
+      this.isEditing = true;
+    },
+    cancelEdit() {
+      this.isEditing = false;
+      this.editedContent = '';
+    },
+    async saveEdit() {
+      if (this.isSaving || !this.editedContent) {
+        return;
+      }
+      this.isSaving = true;
+      try {
+        const recordId = this.serverRecordId || this.record.recordId;
+        const newSegments = [{ text: this.editedContent }];
+        const originalTextJson = JSON.stringify(newSegments);
+        if (recordId) {
+          await updateOriginalText(recordId, 1, originalTextJson);
+        }
+        this.record.content = this.editedContent;
+        this.record.originalSegments = newSegments;
+        this.updateLocalStorage();
+        uni.showToast({
+          title: '保存成功',
+          icon: 'success'
+        });
+        this.isEditing = false;
+        this.editedContent = '';
+      } catch (e) {
+        console.error('保存失败:', e);
+        uni.showToast({
+          title: e.message || '保存失败',
+          icon: 'none'
+        });
+      } finally {
+        this.isSaving = false;
+      }
+    },
+    updateLocalStorage() {
+      try {
+        const historyData = uni.getStorageSync('visit_history');
+        if (historyData) {
+          const list = JSON.parse(historyData);
+          const index = list.findIndex(item => item.id === this.recordId);
+          if (index !== -1) {
+            list[index].content = this.record.content;
+            list[index].originalSegments = this.record.originalSegments;
+            uni.setStorageSync('visit_history', JSON.stringify(list));
+          }
+        }
+      } catch (e) {
+        console.error('更新本地存储失败:', e);
       }
     }
   }
@@ -281,6 +432,22 @@ export default {
   display: flex;
   align-items: center;
   margin-bottom: 16px;
+  justify-content: space-between;
+}
+
+.section-header > view:first-child {
+  display: flex;
+  align-items: center;
+}
+
+.section-action {
+  padding: 4px 12px;
+}
+
+.action-text {
+  font-size: 14px;
+  color: #0099FF;
+  font-weight: 500;
 }
 
 .section-indicator {
@@ -366,6 +533,90 @@ export default {
   line-height: 1.8;
 }
 
+.transcript-textarea {
+  width: 100%;
+  min-height: 120px;
+  font-size: 14px;
+  color: #444444;
+  line-height: 1.8;
+  background-color: transparent;
+  border: none;
+  outline: none;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+.edit-btn-row {
+  display: flex;
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.cancel-btn {
+  flex: 1;
+  height: 44px;
+  background-color: #F5F5F5;
+  border-radius: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+}
+
+.cancel-btn-text {
+  color: #666666;
+  font-size: 15px;
+  font-weight: 500;
+}
+
+.save-btn {
+  flex: 1;
+  height: 44px;
+  background: linear-gradient(135deg, #0099FF 0%, #0077B3 100%);
+  border-radius: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  box-shadow: 0 4px 12px rgba(0, 133, 208, 0.3);
+}
+
+.save-btn[disabled] {
+  opacity: 0.6;
+}
+
+.save-btn-text {
+  color: #FFFFFF;
+  font-size: 15px;
+  font-weight: 500;
+}
+
+.summarize-btn-wrap {
+  margin-top: 16px;
+}
+
+.summarize-btn {
+  width: 100%;
+  height: 44px;
+  background: linear-gradient(135deg, #0099FF 0%, #0077B3 100%);
+  border-radius: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  box-shadow: 0 4px 12px rgba(0, 133, 208, 0.3);
+}
+
+.summarize-btn[disabled] {
+  opacity: 0.6;
+}
+
+.summarize-btn-text {
+  color: #FFFFFF;
+  font-size: 15px;
+  font-weight: 500;
+}
+
 .summary-content {
   display: flex;
   flex-direction: column;
@@ -377,13 +628,6 @@ export default {
   flex-direction: column;
 }
 
-.summary-label {
-  font-size: 14px;
-  font-weight: 600;
-  color: #333333;
-  margin-bottom: 8px;
-}
-
 .summary-text {
   font-size: 14px;
   color: #555555;
@@ -392,77 +636,6 @@ export default {
   padding: 12px 14px;
   border-radius: 8px;
   border: 1px solid #E2E8F0;
-}
-
-.key-points {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  background-color: #F8FAFC;
-  padding: 12px 14px;
-  border-radius: 8px;
-  border: 1px solid #E2E8F0;
-}
-
-.key-point-item {
-  display: flex;
-  align-items: flex-start;
-}
-
-.point-dot {
-  color: #0099FF;
-  font-size: 14px;
-  margin-right: 8px;
-  line-height: 1.6;
-}
-
-.point-text {
-  font-size: 14px;
-  color: #555555;
-  line-height: 1.6;
-  flex: 1;
-}
-
-.todo-list {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  background-color: #F8FAFC;
-  padding: 12px 14px;
-  border-radius: 8px;
-  border: 1px solid #E2E8F0;
-}
-
-.todo-item {
-  display: flex;
-  align-items: flex-start;
-}
-
-.todo-checkbox {
-  width: 18px;
-  height: 18px;
-  border-radius: 4px;
-  background-color: #22C55E;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  margin-right: 10px;
-  margin-top: 1px;
-  flex-shrink: 0;
-}
-
-.todo-check-icon {
-  color: #FFFFFF;
-  font-size: 12px;
-  font-weight: bold;
-}
-
-.todo-text {
-  font-size: 14px;
-  color: #555555;
-  line-height: 1.6;
-  text-decoration: line-through;
-  opacity: 0.7;
 }
 
 .processing-wrap {

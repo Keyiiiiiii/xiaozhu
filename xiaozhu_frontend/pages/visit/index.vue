@@ -98,7 +98,7 @@
       <view class="history-list">
         <view class="history-card" v-for="(item, index) in historyList" :key="item.id" @click="goToDetail(item.id)">
           <view class="history-card-head">
-            <text class="history-name" @click.stop="openEditNameModal(index)">{{ item.name }}</text>
+            <text class="history-name">{{ item.name }}</text>
             <text class="history-state" :class="item.status === 'done' ? 'state-done' : (item.status === 'failed' ? 'state-failed' : 'state-processing')">
               {{ item.status === 'done' ? '已提取' : (item.status === 'failed' ? '转写失败' : '处理中') }}
             </text>
@@ -120,11 +120,11 @@
       </view>
     </view>
 
-    <!-- 修改走访名称遮罩层 -->
+    <!-- 输入走访名称遮罩层 -->
     <view class="modal-mask" v-if="showNameModal" @click="closeNameModal">
       <view class="modal-content" @click.stop>
         <view class="modal-header">
-          <text class="modal-title">修改走访名称</text>
+          <text class="modal-title">输入走访名称</text>
         </view>
         <view class="modal-body">
           <input
@@ -146,37 +146,6 @@
       </view>
     </view>
 
-    <!-- 地图选择遮罩层 -->
-    <view class="map-modal" v-if="showMapModal">
-      <view class="map-modal-header">
-        <view class="map-close-btn" @click="closeMapModal">
-          <text class="map-close-text">取消</text>
-        </view>
-        <text class="map-modal-title">选择走访位置</text>
-        <view class="map-confirm-btn" @click="confirmMapLocation">
-          <text class="map-confirm-text">确定</text>
-        </view>
-      </view>
-      <map
-        class="map-container"
-        id="visitMap"
-        ref="visitMap"
-        :longitude="mapLongitude"
-        :latitude="mapLatitude"
-        :scale="mapScale"
-        :show-location="true"
-        :markers="mapMarkers"
-        @tap="onMapTap"
-        @regionchange="onMapRegionChange"
-      />
-      <view class="map-center-marker">
-        <image class="map-marker-icon" src="/static/location.png" mode="aspectFit" />
-      </view>
-      <view class="map-address-bar">
-        <text class="map-address-label">当前位置：</text>
-        <text class="map-address-text">{{ selectedAddress || '正在定位...' }}</text>
-      </view>
-    </view>
   </view>
 </template>
 
@@ -185,7 +154,7 @@
 import permission from "@/common/permission.js"
 // #endif
 import { getVoiceWsUrl } from "@/api/voice.js";
-import { uploadAudioFile, submitSpeechToText, connectAsrWebSocket } from "@/api/file.js";
+import { uploadAudioFile, submitSpeechToText, connectAsrWebSocket, getRecordIds, getRecordDetail } from "@/api/file.js";
 import { showNotification } from "@/common/notification.js";
 
 const FRAME = { FIRST: 0, CONTINUE: 1, LAST: 2 };
@@ -255,29 +224,17 @@ export default {
       
       // 历史记录列表
       historyList: [],
-      // 当前正在编辑的记录索引
-      editingIndex: -1,
       // 编辑中的名称
       editingName: "",
       // 是否显示名称修改弹窗
       showNameModal: false,
+      // 名称弹窗模式：create（新建时输入名称）
+      nameModalMode: "create",
       // 当前定位地址
       currentAddress: "",
       
-      // 地图选择相关
-      showMapModal: false,
-      mapLongitude: 116.397477,
-      mapLatitude: 39.908692,
-      mapScale: 16,
-      mapMarkers: [],
-      selectedAddress: "",
-      selectedLatitude: 0,
-      selectedLongitude: 0,
-      mapContext: null,
       pendingRecord: null,
-      isNewRecord: false,
       isUploading: false,
-      uploadProgress: 0,
       asrWebSocketMap: null,
       isAsrProcessing: false,
     };
@@ -398,27 +355,12 @@ export default {
         return;
       }
 
-      this.isUploading = true;
-      this.uploadProgress = 0;
-
       try {
-        uni.showLoading({
-          title: "正在上传...",
-          mask: true
-        });
-
-        const uploadResult = await uploadAudioFile(filePath, { creator_id: 1 }, fileObject);
-        console.log("上传成功:", uploadResult);
-        const fileUrl = uploadResult.file_url;
-        const recordId = uploadResult.record_id;
-
-        const sttResult = await submitSpeechToText(recordId, 1);
-        console.log("转写任务已提交:", sttResult);
-
         const duration = await this.getAudioDuration(filePath);
         console.log("音频时长:", duration);
 
         this.savedAudioPath = filePath;
+        this.savedAudioFile = fileObject || null;
         this.recognizedText = "";
         this.hasRecorded = true;
         this.recordDuration = Math.floor(duration);
@@ -432,32 +374,21 @@ export default {
           duration: Math.floor(duration),
           durationText: this.formatDurationText(Math.floor(duration)),
           content: "",
-          audioPath: fileUrl,
-          recordId: recordId,
-          isAudioUploaded: true,
-          createTime: now.getTime(),
-          jobId: sttResult.job_id
+          audioPath: filePath,
+          isAudioUploaded: false,
+          createTime: now.getTime()
         };
 
-        this.listenForAsrResult(sttResult.job_id, recordId);
-
-        this.openMapModal();
-
-        uni.hideLoading();
-        uni.showToast({
-          title: "上传成功",
-          icon: "success"
-        });
+        // 弹出名称输入框
+        this.editingName = "走访记录";
+        this.showNameModal = true;
+        this.nameModalMode = "create";
       } catch (error) {
-        console.error("上传失败:", error);
-        uni.hideLoading();
+        console.error("处理上传文件失败:", error);
         uni.showToast({
-          title: error.message || "上传失败",
+          title: error.message || "处理文件失败",
           icon: "none"
         });
-      } finally {
-        this.isUploading = false;
-        this.uploadProgress = 0;
       }
     },
 
@@ -1058,150 +989,17 @@ export default {
         createTime: now.getTime()
       };
       
-      // 打开地图选择位置
-      this.openMapModal();
+      // 弹出名称输入框
+      this.editingName = "走访记录";
+      this.showNameModal = true;
+      this.nameModalMode = "create";
     },
     
-    openMapModal() {
-      this.showMapModal = true;
-      this.selectedAddress = "";
-      this.selectedLatitude = 0;
-      this.selectedLongitude = 0;
-      
-      setTimeout(() => {
-        this.mapContext = uni.createMapContext("visitMap", this);
-        this.getCurrentLocation();
-      }, 100);
-    },
-    
-    closeMapModal() {
-      this.showMapModal = false;
-      this.mapContext = null;
-      this.pendingRecord = null;
-      
-      // 取消地图选择，完全收起走访记录面板
-      this.hasRecorded = false;
-      this.recognizedText = "";
-      this.transcriptCollapsed = false;
-      this.textSegments = [];
-      this.savedAudioPath = "";
-      this.savedAudioFile = null;
-      this.savedAudioFileName = "";
-      this.recordDuration = 0;
-    },
-    
-    getCurrentLocation() {
-      uni.getLocation({
-        type: 'gcj02',
-        success: (res) => {
-          console.log("定位成功:", res);
-          this.mapLongitude = res.longitude;
-          this.mapLatitude = res.latitude;
-          this.selectedLatitude = res.latitude;
-          this.selectedLongitude = res.longitude;
-          
-          this.updateMapMarker(res.latitude, res.longitude);
-          this.reverseGeocode(res.latitude, res.longitude);
-        },
-        fail: (err) => {
-          console.warn("定位失败:", err);
-          this.selectedAddress = "当前位置";
-          this.selectedLatitude = this.mapLatitude;
-          this.selectedLongitude = this.mapLongitude;
-          this.updateMapMarker(this.mapLatitude, this.mapLongitude);
-          uni.showToast({
-            title: "定位失败，使用默认位置",
-            icon: "none"
-          });
-        }
-      });
-    },
-    
-    updateMapMarker(lat, lng) {
-      this.mapMarkers = [{
-        id: 0,
-        latitude: lat,
-        longitude: lng,
-        iconPath: '/static/location.png',
-        width: 30,
-        height: 30,
-        anchor: {
-          x: 0.5,
-          y: 1
-        }
-      }];
-    },
-    
-    reverseGeocode(lat, lng) {
-      this.selectedLatitude = lat;
-      this.selectedLongitude = lng;
-      
-      // #ifdef APP-PLUS
-      if (window && window.plus) {
-        plus.maps.Map.reverseGeocode({
-          coordinate: {
-            latitude: lat,
-            longitude: lng
-          },
-          success: (res) => {
-            if (res && res.address) {
-              this.selectedAddress = res.address;
-            } else {
-              this.selectedAddress = "当前位置";
-            }
-          },
-          fail: (err) => {
-            console.warn("逆地理编码失败:", err);
-            this.selectedAddress = "当前位置";
-          }
-        });
-      } else {
-        this.selectedAddress = "当前位置";
-      }
-      // #endif
-      
-      // #ifdef H5
-      this.selectedAddress = "当前位置";
-      // #endif
-      
-      // #ifdef MP-WEIXIN
-      this.selectedAddress = "当前位置";
-      // #endif
-    },
-    
-    onMapTap(e) {
-      console.log("点击地图:", e);
-      const { latitude, longitude } = e.detail;
-      this.mapLatitude = latitude;
-      this.mapLongitude = longitude;
-      this.selectedLatitude = latitude;
-      this.selectedLongitude = longitude;
-      this.updateMapMarker(latitude, longitude);
-      this.reverseGeocode(latitude, longitude);
-    },
-    
-    onMapRegionChange(e) {
-      if (e.type === 'end' && e.causedBy === 'drag') {
-        if (this.mapContext) {
-          this.mapContext.getCenterLocation({
-            success: (res) => {
-              this.selectedLatitude = res.latitude;
-              this.selectedLongitude = res.longitude;
-              this.updateMapMarker(res.latitude, res.longitude);
-              this.reverseGeocode(res.latitude, res.longitude);
-            }
-          });
-        }
-      }
-    },
-    
-    async confirmMapLocation() {
+    async uploadVisitRecord() {
       if (!this.pendingRecord) {
-        this.closeMapModal();
         return;
       }
 
-      const address = this.selectedAddress || "未知位置";
       const audioPath = this.pendingRecord.audioPath;
       const isAudioUploaded = this.pendingRecord.isAudioUploaded;
 
@@ -1230,9 +1028,10 @@ export default {
 
           const formData = {
             creator_id: 1,
-            customer_name: address,
+            customer_name: this.pendingRecord.name || "走访记录",
             visit_time: visitDate,
-            status: 1
+            status: 1,
+            duration_seconds: this.pendingRecord.duration || 0
           };
 
           const res = await uploadAudioFile(audioPath, formData, this.savedAudioFile);
@@ -1246,9 +1045,9 @@ export default {
 
         const record = {
           ...this.pendingRecord,
-          name: address,
-          latitude: this.selectedLatitude,
-          longitude: this.selectedLongitude,
+          name: this.pendingRecord.name || "走访记录",
+          latitude: 0,
+          longitude: 0,
           audioPath: finalAudioUrl,
           recordId: serverRecordId,
           content: this.recognizedText || this.pendingRecord.content,
@@ -1263,14 +1062,9 @@ export default {
           this.listenForAsrResult(jobId, serverRecordId, record.id);
         }
 
-        this.showMapModal = false;
-        this.mapContext = null;
         this.pendingRecord = null;
 
-        this.editingIndex = 0;
-        this.editingName = address;
-        this.isNewRecord = true;
-        this.showNameModal = true;
+        this.resetRecordState();
 
         uni.hideLoading();
         uni.showToast({
@@ -1306,40 +1100,28 @@ export default {
     },
     
     goToDetail(id) {
+      const record = this.historyList.find(item => item.id === id);
+      const recordIdParam = record && record.recordId ? `&recordId=${record.recordId}` : '';
       uni.navigateTo({
-        url: `/pages/visit/detail?id=${id}`
+        url: `/pages/visit/detail?id=${id}${recordIdParam}`
       });
     },
 
-    openEditNameModal(index) {
-      if (index >= 0 && index < this.historyList.length) {
-        this.editingIndex = index;
-        this.editingName = this.historyList[index].name;
-        this.showNameModal = true;
-      }
-    },
-    
     closeNameModal() {
       this.showNameModal = false;
-      this.editingIndex = -1;
       this.editingName = "";
       
-      // 如果是新建记录取消，也完全收起走访记录面板
-      if (this.isNewRecord) {
-        this.hasRecorded = false;
-        this.recognizedText = "";
-        this.transcriptCollapsed = false;
-        this.isNewRecord = false;
-        this.textSegments = [];
-        this.savedAudioPath = "";
-        this.savedAudioFile = null;
-        this.savedAudioFileName = "";
-        this.recordDuration = 0;
+      if (this.nameModalMode === "create" && !this.isUploading) {
+        this.pendingRecord = null;
+        this.resetRecordState();
       }
+      
+      this.nameModalMode = "create";
     },
     
-    confirmEditName() {
-      if (!this.editingName.trim()) {
+    async confirmEditName() {
+      const name = this.editingName.trim();
+      if (!name) {
         uni.showToast({
           title: "名称不能为空",
           icon: "none"
@@ -1347,25 +1129,15 @@ export default {
         return;
       }
       
-      if (this.editingIndex >= 0 && this.editingIndex < this.historyList.length) {
-        this.historyList[this.editingIndex].name = this.editingName.trim();
-        this.saveHistoryToStorage();
+      if (this.nameModalMode === "create" && this.pendingRecord) {
+        this.pendingRecord.name = name;
+        this.showNameModal = false;
+        this.editingName = "";
+        await this.uploadVisitRecord();
+        return;
       }
       
       this.closeNameModal();
-      
-      // 如果是新建记录，确认名称后完全收起走访记录面板
-      if (this.isNewRecord) {
-        this.hasRecorded = false;
-        this.recognizedText = "";
-        this.transcriptCollapsed = false;
-        this.isNewRecord = false;
-        this.textSegments = [];
-        this.savedAudioPath = "";
-        this.savedAudioFile = null;
-        this.savedAudioFileName = "";
-        this.recordDuration = 0;
-      }
     },
     
     saveHistoryToStorage() {
@@ -1377,14 +1149,105 @@ export default {
     },
     
     loadHistoryFromStorage() {
+      this.loadHistoryFromApi();
+    },
+
+    async loadHistoryFromApi() {
       try {
-        const data = uni.getStorageSync('visit_history');
-        if (data) {
-          this.historyList = JSON.parse(data);
-        }
+        const records = await getRecordIds(1);
+        this.historyList = records.map(r => this.mapListRecordToLocal(r)).sort((a, b) => {
+          return new Date(b.visitTime).getTime() - new Date(a.visitTime).getTime();
+        });
       } catch (e) {
-        console.error("加载历史记录失败:", e);
+        console.error("从API加载历史记录失败:", e);
       }
+    },
+
+    mapListRecordToLocal(listRecord) {
+      let visitTime = "";
+      if (listRecord.visit_time) {
+        const d = new Date(listRecord.visit_time);
+        if (!isNaN(d.getTime())) {
+          visitTime = this.formatDateTime(d);
+        }
+      }
+
+      const duration = listRecord.duration_seconds || 0;
+      let durationText = "--";
+      if (duration > 0) {
+        durationText = this.formatDurationText(duration);
+      }
+
+      return {
+        id: "record_" + listRecord.id,
+        recordId: listRecord.id,
+        name: listRecord.customer_name || "走访记录",
+        status: "processing",
+        visitTime: visitTime,
+        duration: duration,
+        durationText: durationText,
+        content: "",
+        audioPath: "",
+        aiSummary: "",
+        latitude: 0,
+        longitude: 0
+      };
+    },
+
+    mapServerRecordToLocal(serverRecord) {
+      let content = "";
+      if (serverRecord.original_text) {
+        let segments = serverRecord.original_text;
+        if (typeof segments === 'string') {
+          try {
+            segments = JSON.parse(segments);
+          } catch (e) {
+            segments = null;
+            content = serverRecord.original_text;
+          }
+        }
+        if (Array.isArray(segments)) {
+          content = segments.map(s => s.text || "").join("");
+        } else if (!content && typeof segments === 'string') {
+          content = segments;
+        }
+      }
+
+      let status = "processing";
+      if (serverRecord.status === "success") {
+        status = "done";
+      } else if (serverRecord.status === "failed" || serverRecord.status === "error") {
+        status = "failed";
+      }
+
+      let visitTime = "";
+      if (serverRecord.visit_time) {
+        const d = new Date(serverRecord.visit_time);
+        if (!isNaN(d.getTime())) {
+          visitTime = this.formatDateTime(d);
+        }
+      }
+
+      const duration = serverRecord.duration_seconds || 0;
+      let durationText = "--";
+      if (duration > 0) {
+        durationText = this.formatDurationText(duration);
+      }
+
+      return {
+        id: "record_" + serverRecord.id,
+        recordId: serverRecord.id,
+        name: serverRecord.customer_name || "走访记录",
+        status: status,
+        visitTime: visitTime,
+        duration: duration,
+        durationText: durationText,
+        content: content,
+        audioPath: serverRecord.audio_url || "",
+        aiSummary: serverRecord.ai_summary || "",
+        latitude: 0,
+        longitude: 0
+      };
     },
     
     resetRecordState() {
@@ -1582,8 +1445,12 @@ export default {
     },
   },
   onLoad() {
-    this.loadHistoryFromStorage();
-    this.resumePendingAsrTasks();
+    this.loadHistoryFromApi().then(() => {
+      this.resumePendingAsrTasks();
+    });
+  },
+  onShow() {
+    this.loadHistoryFromApi();
   },
   beforeDestroy() {
     this.closeAsrWebSocket();
@@ -1956,83 +1823,6 @@ export default {
 }
 .modal-btn-text {
   font-size: 16px;
-}
-
-/* 地图选择弹窗 */
-.map-modal {
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background-color: #FFFFFF;
-  z-index: 1000;
-  display: flex;
-  flex-direction: column;
-}
-.map-modal-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 12px 16px;
-  background-color: #FFFFFF;
-  border-bottom: 1px solid #EEEEEE;
-  padding-top: calc(12px + var(--status-bar-height));
-}
-.map-close-btn,
-.map-confirm-btn {
-  padding: 8px 12px;
-}
-.map-close-text {
-  font-size: 15px;
-  color: #666666;
-}
-.map-confirm-text {
-  font-size: 15px;
-  color: #0099FF;
-  font-weight: 600;
-}
-.map-modal-title {
-  font-size: 17px;
-  font-weight: 600;
-  color: #222222;
-}
-.map-container {
-  flex: 1;
-  width: 100%;
-}
-.map-center-marker {
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -100%);
-  pointer-events: none;
-  z-index: 10;
-}
-.map-marker-icon {
-  width: 36px;
-  height: 36px;
-}
-.map-address-bar {
-  position: absolute;
-  left: 16px;
-  right: 16px;
-  bottom: 20px;
-  background-color: #FFFFFF;
-  border-radius: 12px;
-  padding: 14px 16px;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1);
-  z-index: 20;
-}
-.map-address-label {
-  font-size: 13px;
-  color: #999999;
-  margin-right: 4px;
-}
-.map-address-text {
-  font-size: 14px;
-  color: #333333;
-  font-weight: 500;
 }
 
 /* 历史记录卡片化 */

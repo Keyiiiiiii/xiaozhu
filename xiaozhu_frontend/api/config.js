@@ -9,6 +9,10 @@ const config = {
     baseUrl: "http://localhost:8001",
     uploadPath: "/api/file/upload/",
     speechToTextPath: "/api/file/speech-to-text/",
+    summarizePath: "/api/file/summarize/",
+    recordIdsPath: "/api/file/record-ids/",
+    recordDetailPath: "/api/file/record-detail/",
+    updateOriginalTextPath: "/api/file/update-original-text/",
     wsBaseUrl: "ws://localhost:8001",
     wsPath: "/ws/asr/"
   },

@@ -113,6 +113,143 @@ export function submitSpeechToText(recordId, creatorId) {
   });
 }
 
+export function summarizeRecording(recordId, creatorId) {
+  return new Promise((resolve, reject) => {
+    const baseUrl = config.fileServer.baseUrl.replace(/\/+$/, "");
+    const url = `${baseUrl}${config.fileServer.summarizePath}`;
+
+    console.log("提交智能总结任务:", url, { record_id: recordId, id: creatorId });
+
+    uni.request({
+      url: url,
+      method: 'POST',
+      header: {
+        'content-type': 'application/x-www-form-urlencoded'
+      },
+      data: {
+        creator_id: creatorId || 1,
+        id: recordId
+      },
+      success: (res) => {
+        if (res.statusCode === 200 && res.data && res.data.status === "success") {
+          resolve({
+            aiSummary: res.data.ai_summary,
+            recordId: res.data.record_id
+          });
+        } else {
+          reject(new Error((res.data && res.data.message) || "智能总结失败"));
+        }
+      },
+      fail: (err) => {
+        reject(new Error(err.errMsg || "请求失败"));
+      }
+    });
+  });
+}
+
+export function getRecordIds(creatorId) {
+  return new Promise((resolve, reject) => {
+    const baseUrl = config.fileServer.baseUrl.replace(/\/+$/, "");
+    const url = `${baseUrl}${config.fileServer.recordIdsPath}`;
+
+    console.log("获取记录列表:", url, { creator_id: creatorId });
+
+    uni.request({
+      url: url,
+      method: 'POST',
+      header: {
+        'content-type': 'application/x-www-form-urlencoded'
+      },
+      data: {
+        creator_id: creatorId || 1
+      },
+      success: (res) => {
+        if (res.statusCode === 200 && res.data && res.data.status === "success") {
+          const records = res.data.records || [];
+          const result = records.map(record => ({
+            id: record[0],
+            customer_name: record[1],
+            duration_seconds: record[2],
+            visit_time: record[3]
+          }));
+          resolve(result);
+        } else {
+          reject(new Error((res.data && res.data.message) || "获取记录列表失败"));
+        }
+      },
+      fail: (err) => {
+        reject(new Error(err.errMsg || "请求失败"));
+      }
+    });
+  });
+}
+
+export function updateOriginalText(recordId, creatorId, originalText) {
+  return new Promise((resolve, reject) => {
+    const baseUrl = config.fileServer.baseUrl.replace(/\/+$/, "");
+    const url = `${baseUrl}${config.fileServer.updateOriginalTextPath}`;
+
+    console.log("更新录音文本:", url, { id: recordId, creator_id: creatorId, original_text: originalText });
+
+    uni.request({
+      url: url,
+      method: 'POST',
+      header: {
+        'content-type': 'application/x-www-form-urlencoded'
+      },
+      data: {
+        creator_id: creatorId || 1,
+        id: recordId,
+        original_text: originalText
+      },
+      success: (res) => {
+        if (res.statusCode === 200 && res.data && res.data.status === "success") {
+          resolve({
+            recordId: res.data.record_id,
+            message: res.data.message
+          });
+        } else {
+          reject(new Error((res.data && res.data.message) || "更新录音文本失败"));
+        }
+      },
+      fail: (err) => {
+        reject(new Error(err.errMsg || "请求失败"));
+      }
+    });
+  });
+}
+
+export function getRecordDetail(recordId, creatorId) {
+  return new Promise((resolve, reject) => {
+    const baseUrl = config.fileServer.baseUrl.replace(/\/+$/, "");
+    const url = `${baseUrl}${config.fileServer.recordDetailPath}`;
+
+    console.log("获取记录详情:", url, { id: recordId, creator_id: creatorId });
+
+    uni.request({
+      url: url,
+      method: 'POST',
+      header: {
+        'content-type': 'application/x-www-form-urlencoded'
+      },
+      data: {
+        creator_id: creatorId || 1,
+        id: recordId
+      },
+      success: (res) => {
+        if (res.statusCode === 200 && res.data && res.data.status === "success") {
+          resolve(res.data.data);
+        } else {
+          reject(new Error((res.data && res.data.message) || "获取记录详情失败"));
+        }
+      },
+      fail: (err) => {
+        reject(new Error(err.errMsg || "请求失败"));
+      }
+    });
+  });
+}
+
 export function connectAsrWebSocket(jobId, callbacks) {
   const wsBaseUrl = config.fileServer.wsBaseUrl.replace(/\/+$/, "");
   const wsPath = config.fileServer.wsPath.replace(/^\/|\/$/g, "");
