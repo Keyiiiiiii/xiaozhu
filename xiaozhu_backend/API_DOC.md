@@ -23,7 +23,8 @@ curl -X POST http://localhost:8000/api/file/upload/ \
   -F "creator_id=1" \      
   -F "customer_name=张三" \   
   -F "visit_time=2026-07-17" \
-  -F "status=1"
+  -F "status=1" \
+  -F "duration_seconds=10"
 
 curl -X POST http://localhost:8000/api/file/speech-to-text/ -d "creator_id=1" -d "id=1"
 
@@ -72,6 +73,7 @@ ws://localhost:8000/ws/asr/{job_id}/
 | `customer_name` | String | 否 | `"cus"` | 走访对象名称 |
 | `visit_time` | String | 否 | `"2026-07-01"` | 走访时间，格式：`YYYY-MM-DD` |
 | `status` | Integer | 否 | `1` | 状态值，映射关系见下表 |
+| `duration_seconds` | Integer | 否 | `0` | 音频时长，单位：秒 |
 
 ### 状态值映射
 
@@ -481,9 +483,21 @@ curl -X POST http://localhost:8000/api/file/summarize/ \
 {
     "status": "success",
     "message": "获取成功",
-    "record_ids": [1, 2, 3, 4, 5]
+    "records": [
+        [1, "张三", 120, "2026-07-20T10:30:00"],
+        [2, "李四", 60, "2026-07-21T14:15:00"]
+    ]
 }
 ```
+
+响应数据结构说明：
+
+| 索引 | 字段名 | 类型 | 说明 |
+| :--- | :--- | :--- | :--- |
+| 0 | id | Integer | 走访记录ID |
+| 1 | customer_name | String | 走访对象名称 |
+| 2 | duration_seconds | Integer/null | 音频时长（秒） |
+| 3 | visit_time | String/null | 走访时间（ISO格式） |
 
 ### 失败响应
 

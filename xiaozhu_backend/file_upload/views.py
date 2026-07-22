@@ -71,6 +71,7 @@ def upload_file(request):
         customer_name = request.POST.get("customer_name", "cus")
         visit_time_str = request.POST.get("visit_time", "2026-07-01")
         status = int(request.POST.get("status", 1))
+        duration_seconds = int(request.POST.get("duration_seconds", 0))
 
         try:
             visit_time = datetime.strptime(visit_time_str, "%Y-%m-%d")
@@ -78,15 +79,6 @@ def upload_file(request):
             visit_time = datetime.now()
 
         status_str = STATUS_MAP.get(status, "pending")
-
-        duration_seconds = None
-        try:
-            uploaded_file.seek(0)
-            audio = mutagen.File(uploaded_file)
-            duration_seconds = int(audio.info.length)
-        except Exception as ee:
-            print("error:", ee)
-            pass
 
         try:
             creator = User.objects.get(id=creator_id)
@@ -361,12 +353,20 @@ def get_record_ids(request):
         }, status=400)
 
     records = VisitRecord.objects.filter(creator_id=creator_id)
-    record_ids = [record.id for record in records]
+    record_list = []
+    for record in records:
+        visit_time_str = record.visit_time.isoformat() if record.visit_time else None
+        record_list.append([
+            record.id,
+            record.customer_name,
+            record.duration_seconds,
+            visit_time_str
+        ])
 
     return JsonResponse({
         "status": "success",
         "message": "获取成功",
-        "record_ids": record_ids
+        "records": record_list
     })
 
 
