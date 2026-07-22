@@ -361,12 +361,20 @@ def get_record_ids(request):
         }, status=400)
 
     records = VisitRecord.objects.filter(creator_id=creator_id)
-    record_ids = [record.id for record in records]
+    record_list = []
+    for record in records:
+        visit_time_str = record.visit_time.isoformat() if record.visit_time else None
+        record_list.append([
+            record.id,
+            record.customer_name,
+            record.duration_seconds,
+            visit_time_str
+        ])
 
     return JsonResponse({
         "status": "success",
         "message": "获取成功",
-        "record_ids": record_ids
+        "records": record_list
     })
 
 

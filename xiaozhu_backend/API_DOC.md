@@ -481,9 +481,21 @@ curl -X POST http://localhost:8000/api/file/summarize/ \
 {
     "status": "success",
     "message": "获取成功",
-    "record_ids": [1, 2, 3, 4, 5]
+    "records": [
+        [1, "张三", 120, "2026-07-20T10:30:00"],
+        [2, "李四", 60, "2026-07-21T14:15:00"]
+    ]
 }
 ```
+
+响应数据结构说明：
+
+| 索引 | 字段名 | 类型 | 说明 |
+| :--- | :--- | :--- | :--- |
+| 0 | id | Integer | 走访记录ID |
+| 1 | customer_name | String | 走访对象名称 |
+| 2 | duration_seconds | Integer/null | 音频时长（秒） |
+| 3 | visit_time | String/null | 走访时间（ISO格式） |
 
 ### 失败响应
 
