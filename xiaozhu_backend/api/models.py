@@ -67,7 +67,7 @@ class VisitRecord(models.Model):
         blank=True,
         verbose_name="音频文件URL"
     )
-    original_text = models.TextField(
+    original_text = models.JSONField(
         null=True, 
         blank=True, 
         verbose_name="原始转写文本"
@@ -80,6 +80,11 @@ class VisitRecord(models.Model):
     visit_time = models.DateTimeField(
         auto_now_add=True, 
         verbose_name="走访时间"
+    )
+    duration_seconds = models.PositiveIntegerField(
+        null=True,
+        blank=True,
+        verbose_name="沟通时长"
     )
     business_type = models.CharField(
         null=True, 
