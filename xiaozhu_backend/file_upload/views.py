@@ -71,6 +71,7 @@ def upload_file(request):
         customer_name = request.POST.get("customer_name", "cus")
         visit_time_str = request.POST.get("visit_time", "2026-07-01")
         status = int(request.POST.get("status", 1))
+        duration_seconds = int(request.POST.get("duration_seconds", 0))
 
         try:
             visit_time = datetime.strptime(visit_time_str, "%Y-%m-%d")
@@ -78,15 +79,6 @@ def upload_file(request):
             visit_time = datetime.now()
 
         status_str = STATUS_MAP.get(status, "pending")
-
-        duration_seconds = None
-        try:
-            uploaded_file.seek(0)
-            audio = mutagen.File(uploaded_file)
-            duration_seconds = int(audio.info.length)
-        except Exception as ee:
-            print("error:", ee)
-            pass
 
         try:
             creator = User.objects.get(id=creator_id)
