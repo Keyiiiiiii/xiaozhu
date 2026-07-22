@@ -130,9 +130,8 @@ def poll_asr_job(job_id, record_id, headers):
                     headers=headers,
                     timeout=30
                 )
-
                 visit_record = VisitRecord.objects.get(id=record_id)
-                visit_record.original_text = job.get("segments", "")
+                visit_record.original_text = job
                 visit_record.status = "success"
                 visit_record.save()
 

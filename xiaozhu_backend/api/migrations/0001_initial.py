@@ -94,7 +94,7 @@ class Migration(migrations.Migration):
                 ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
                 ('customer_name', models.CharField(max_length=150, verbose_name='走访对象')),
                 ('audio_url', models.URLField(blank=True, max_length=500, null=True, verbose_name='音频文件URL')),
-                ('original_text', models.TextField(blank=True, null=True, verbose_name='原始转写文本')),
+                ('original_text', models.JSONField(blank=True, null=True, verbose_name='原始转写文本')),
                 ('ai_summary', models.TextField(blank=True, null=True, verbose_name='AI总结文本')),
                 ('visit_time', models.DateTimeField(auto_now_add=True, verbose_name='走访时间')),
                 ('business_type', models.CharField(blank=True, max_length=100, null=True, verbose_name='关联业务类型')),

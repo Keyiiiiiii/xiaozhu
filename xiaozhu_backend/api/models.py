@@ -67,7 +67,7 @@ class VisitRecord(models.Model):
         blank=True,
         verbose_name="音频文件URL"
     )
-    original_text = models.TextField(
+    original_text = models.JSONField(
         null=True, 
         blank=True, 
         verbose_name="原始转写文本"
