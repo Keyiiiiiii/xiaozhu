@@ -5,6 +5,7 @@ import threading
 import requests
 from io import BytesIO
 from datetime import datetime
+import mutagen
 from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
@@ -78,6 +79,15 @@ def upload_file(request):
 
         status_str = STATUS_MAP.get(status, "pending")
 
+        duration_seconds = None
+        try:
+            uploaded_file.seek(0)
+            audio = mutagen.File(uploaded_file)
+            duration_seconds = int(audio.info.length)
+        except Exception as ee:
+            print("error:", ee)
+            pass
+
         try:
             creator = User.objects.get(id=creator_id)
         except User.DoesNotExist:
@@ -91,6 +101,7 @@ def upload_file(request):
             customer_name=customer_name,
             audio_url=result["url"],
             visit_time=visit_time,
+            duration_seconds=duration_seconds,
             status=status_str
         )
 
@@ -98,7 +109,8 @@ def upload_file(request):
             "status": "success",
             "message": "文件上传成功",
             "file_url": result["url"],
-            "record_id": visit_record.id
+            "record_id": visit_record.id,
+            "duration_seconds": duration_seconds
         })
     else:
         return JsonResponse({
@@ -285,7 +297,7 @@ def summarize_record(request):
     if not creator_id or not record_id:
         return JsonResponse({
             "status": "error",
-            "message": "id 和 record_id 不能为空。"
+            "message": "id 和 creator_id 不能为空。"
         }, status=400)
 
     try:
@@ -389,6 +401,7 @@ def get_record_detail(request):
             "original_text": visit_record.original_text,
             "ai_summary": visit_record.ai_summary,
             "visit_time": visit_record.visit_time.isoformat() if visit_record.visit_time else None,
+            "duration_seconds": visit_record.duration_seconds,
             "business_type": visit_record.business_type,
             "status": visit_record.status
         }

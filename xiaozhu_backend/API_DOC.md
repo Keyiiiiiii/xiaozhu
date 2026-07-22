@@ -56,7 +56,7 @@ ws://localhost:8000/ws/asr/{job_id}/
 
 ### 接口描述
 
-上传音频文件到 MinIO 存储，同时在数据库 `api_visitrecord` 表中创建走访记录，并返回文件访问 URL。
+上传音频文件到 MinIO 存储，同时计算文件时长并在数据库 `api_visitrecord` 表中创建走访记录，返回文件访问 URL。
 
 ### 请求信息
 
@@ -99,7 +99,8 @@ ws://localhost:8000/ws/asr/{job_id}/
     "status": "success",
     "message": "文件上传成功",
     "file_url": "http://localhost:9000/xiaozhu/da16a319bd1949a783be18783b8fbf9f.m4a",
-    "record_id": 1
+    "record_id": 1,
+    "duration_seconds": 120
 }
 ```
 
@@ -369,7 +370,7 @@ asyncio.run(get_asr_result('your_job_id_here'))
 
 ### 接口描述
 
-根据 `id`（creator_id）和 `record_id` 从数据库 `api_visitrecord` 表中获取 `original_text` 字段内容，调用 AI 总结接口进行总结，并将总结结果存入 `ai_summary` 字段。
+根据 `record_id`（id）和 `creator_id` 从数据库 `api_visitrecord` 表中获取 `original_text` 字段内容，调用 AI 总结接口进行总结，并将总结结果存入 `ai_summary` 字段。
 
 ### 请求信息
 
@@ -380,8 +381,8 @@ asyncio.run(get_asr_result('your_job_id_here'))
 
 | 参数名 | 类型 | 必填 | 默认值 | 说明 |
 | :--- | :--- | :--- | :--- | :--- |
-| `id` | Integer | 是 | - | 创建人ID，需对应 `api_user` 表中存在的用户 |
-| `record_id` | Integer | 是 | - | 走访记录ID，需对应 `api_visitrecord` 表中存在的记录 |
+| `creator_id` | Integer | 是 | - | 创建人ID，需对应 `api_user` 表中存在的用户 |
+| `id` | Integer | 是 | - | 走访记录ID，需对应 `api_visitrecord` 表中存在的记录 |
 
 ### 成功响应
 
@@ -403,7 +404,7 @@ asyncio.run(get_asr_result('your_job_id_here'))
 ```json
 {
     "status": "error",
-    "message": "id 和 record_id 不能为空"
+    "message": "id 和 creator_id 不能为空"
 }
 ```
 
@@ -538,6 +539,7 @@ curl -X POST http://localhost:8000/api/file/record-ids/ \
         "original_text": "[{'start': 0.0, 'end': 2.58, 'text': '你好...', ...}]",
         "ai_summary": "总结内容...",
         "visit_time": "2026-07-20T10:30:00",
+        "duration_seconds": 120,
         "business_type": null,
         "status": "success"
     }
@@ -855,6 +857,7 @@ curl -X POST http://localhost:8000/api/file/record-detail/ \
         "original_text": "[{'start': 0.0, 'end': 2.58, 'text': '你好...', ...}]",
         "ai_summary": "总结内容...",
         "visit_time": "2026-07-20T10:30:00",
+        "duration_seconds": 120,
         "business_type": null,
         "status": "success"
     }
