@@ -38,8 +38,13 @@ curl -X POST http://localhost:8000/api/file/record-detail/ \
 
 curl -X POST http://localhost:8000/api/file/update-original-text/ \
   -d "creator_id=1" \
-  -d "id=1" \
-  -d "original_text=新的转写文本内容..."
+  -d "id=10" \
+  -d "original_text=新的转写文本内容..." \
+  -d "visit_time=2026-04-01" \
+  -d "customer_name=test张"
+
+curl -X POST http://localhost:8000/api/file/delete-record/ -d "creator_id=1" -d "id=1"
+
 # 5、WebSocket连接获取转写结果：
 ws://localhost:8000/ws/asr/{job_id}/
 ```
