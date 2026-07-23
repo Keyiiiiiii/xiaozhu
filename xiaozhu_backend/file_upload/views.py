@@ -319,7 +319,8 @@ def summarize_record(request):
         raw_text = response["data"]["data"]["outputs"]["text"]
         parsed_data = parse_llm_response(raw_text)
         ai_summary = parsed_data.get("summary", "")
-
+        
+        visit_record.status = "summarized"
         visit_record.ai_summary = ai_summary
         visit_record.save()
 
