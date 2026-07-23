@@ -2,8 +2,8 @@ import config from "./config.js";
 
 export function uploadVisitRecord(filePath, formData) {
   return new Promise((resolve, reject) => {
-    const baseUrl = config.visitServer.baseUrl.replace(/\/+$/, "");
-    const url = `${baseUrl}${config.visitServer.uploadPath}`;
+    const baseUrl = config.fileServer.baseUrl.replace(/\/+$/, "");
+    const url = `${baseUrl}${config.fileServer.uploadPath}`;
 
     console.log("上传走访记录:", url, formData);
 

@@ -5,15 +5,16 @@ const config = {
     //TODO：从后端获取 API Token
     apiToken: "OYECtTTccG1fOzsT6e8EKXR4sOBHJalv"
   },
-  visitServer: {
-    baseUrl: "http://localhost:8001",
-    uploadPath: "/api/file/upload/"
-  },
   fileServer: {
-    //改为后端运行端口
     baseUrl: "http://localhost:8001",
     uploadPath: "/api/file/upload/",
-    speechToTextPath: "/api/file/speech-to-text/"
+    speechToTextPath: "/api/file/speech-to-text/",
+    summarizePath: "/api/file/summarize/",
+    recordIdsPath: "/api/file/record-ids/",
+    recordDetailPath: "/api/file/record-detail/",
+    updateOriginalTextPath: "/api/file/update-original-text/",
+    wsBaseUrl: "ws://localhost:8001",
+    wsPath: "/ws/asr/"
   },
   // TODO: 后端登录认证服务配置
   authServer: {
