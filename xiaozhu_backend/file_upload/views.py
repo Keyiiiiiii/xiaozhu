@@ -358,6 +358,7 @@ def get_record_ids(request):
         visit_time_str = record.visit_time.isoformat() if record.visit_time else None
         record_list.append([
             record.id,
+            record.status,
             record.customer_name,
             record.duration_seconds,
             visit_time_str
@@ -415,6 +416,9 @@ def update_original_text(request):
     creator_id = int(request.POST.get("creator_id", 0))
     record_id = int(request.POST.get("id", 0))
     original_text = request.POST.get("original_text", "")
+    customer_name = request.POST.get("customer_name", "")
+    visit_time_str = request.POST.get("visit_time", "")
+    
 
     if not creator_id or not record_id:
         return JsonResponse({
@@ -422,10 +426,10 @@ def update_original_text(request):
             "message": "creator_id 和 id 不能为空"
         }, status=400)
 
-    if not original_text or not original_text.strip():
+    if not original_text.strip() and not customer_name.strip() and not visit_time_str.strip():
         return JsonResponse({
             "status": "error",
-            "message": "original_text 不能为空"
+            "message": "original_text、customer_name、visit_time 至少传一个"
         }, status=400)
 
     try:
@@ -436,11 +440,60 @@ def update_original_text(request):
             "message": f"走访记录 ID={record_id}, creator_id={creator_id} 不存在"
         }, status=400)
 
-    visit_record.original_text = original_text
-    visit_record.save()
+    update_fields = []
+
+    if original_text.strip():
+        visit_record.original_text = original_text
+        update_fields.append("original_text")
+
+    if customer_name.strip():
+        visit_record.customer_name = customer_name.strip()
+        update_fields.append("customer_name")
+
+    if visit_time_str.strip():
+        try:
+            visit_time = datetime.strptime(visit_time_str, "%Y-%m-%d")
+            visit_record.visit_time = visit_time
+            update_fields.append("visit_time")
+        except ValueError:
+            return JsonResponse({
+                "status": "error",
+                "message": "visit_time 格式错误，应为 YYYY-MM-DD"
+            }, status=400)
+
+    visit_record.save(update_fields=update_fields)
 
     return JsonResponse({
         "status": "success",
         "message": "更新成功",
+        "record_id": record_id
+    })
+
+
+@csrf_exempt
+@require_POST
+def delete_record(request):
+    creator_id = int(request.POST.get("creator_id"))
+    record_id = int(request.POST.get("id"))
+
+    if not creator_id or not record_id:
+        return JsonResponse({
+            "status": "error",
+            "message": "creator_id 和 id 不能为空"
+        }, status=400)
+
+    try:
+        visit_record = VisitRecord.objects.get(id=record_id, creator_id=creator_id)
+    except VisitRecord.DoesNotExist:
+        return JsonResponse({
+            "status": "error",
+            "message": f"走访记录 ID={record_id}, creator_id={creator_id} 不存在"
+        }, status=400)
+
+    visit_record.delete()
+
+    return JsonResponse({
+        "status": "success",
+        "message": "删除成功",
         "record_id": record_id
     })

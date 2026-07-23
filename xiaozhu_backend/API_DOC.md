@@ -444,8 +444,8 @@ asyncio.run(get_asr_result('your_job_id_here'))
 
 ```bash
 curl -X POST http://localhost:8000/api/file/summarize/ \
-  -d "id=1" \
-  -d "record_id=1"
+  -d "creator_id=1" \
+  -d "id=1"
 ```
 
 ### 数据库更新
@@ -484,8 +484,8 @@ curl -X POST http://localhost:8000/api/file/summarize/ \
     "status": "success",
     "message": "获取成功",
     "records": [
-        [1, "张三", 120, "2026-07-20T10:30:00"],
-        [2, "李四", 60, "2026-07-21T14:15:00"]
+        [1, "success", "张三", 120, "2026-07-20T10:30:00"],
+        [2, "pending", "李四", 60, "2026-07-21T14:15:00"]
     ]
 }
 ```
@@ -495,9 +495,10 @@ curl -X POST http://localhost:8000/api/file/summarize/ \
 | 索引 | 字段名 | 类型 | 说明 |
 | :--- | :--- | :--- | :--- |
 | 0 | id | Integer | 走访记录ID |
-| 1 | customer_name | String | 走访对象名称 |
-| 2 | duration_seconds | Integer/null | 音频时长（秒） |
-| 3 | visit_time | String/null | 走访时间（ISO格式） |
+| 1 | status | String | 处理状态 |
+| 2 | customer_name | String | 走访对象名称 |
+| 3 | duration_seconds | Integer/null | 音频时长（秒） |
+| 4 | visit_time | String/null | 走访时间（ISO格式） |
 
 ### 失败响应
 
@@ -592,7 +593,7 @@ curl -X POST http://localhost:8000/api/file/record-detail/ \
 
 ### 接口描述
 
-根据 `creator_id` 和 `id` 更新数据库 `api_visitrecord` 表中对应记录的 `original_text` 字段。
+根据 `creator_id` 和 `id` 更新数据库 `api_visitrecord` 表中对应记录的 `original_text`、`customer_name` 和 `visit_time` 字段。支持按需更新，至少传入一个可更新字段。
 
 ### 请求信息
 
@@ -605,7 +606,9 @@ curl -X POST http://localhost:8000/api/file/record-detail/ \
 | :--- | :--- | :--- | :--- | :--- |
 | `creator_id` | Integer | 是 | - | 创建人ID，需对应 `api_user` 表中存在的用户 |
 | `id` | Integer | 是 | - | 走访记录ID，需对应 `api_visitrecord` 表中存在的记录 |
-| `original_text` | String | 是 | - | 更新后的录音转写文本内容 |
+| `original_text` | String | 否 | - | 更新后的录音转写文本内容 |
+| `customer_name` | String | 否 | - | 更新后的走访对象名称 |
+| `visit_time` | String | 否 | - | 更新后的走访时间，格式：`YYYY-MM-DD` |
 
 ### 成功响应
 
@@ -633,7 +636,95 @@ curl -X POST http://localhost:8000/api/file/record-detail/ \
 ```json
 {
     "status": "error",
-    "message": "original_text 不能为空"
+    "message": "original_text、customer_name、visit_time 至少传一个"
+}
+```
+
+```json
+{
+    "status": "error",
+    "message": "visit_time 格式错误，应为 YYYY-MM-DD"
+}
+```
+
+```json
+{
+    "status": "error",
+    "message": "走访记录 ID=1, creator_id=1 不存在"
+}
+```
+
+### 示例请求
+
+更新录音文本：
+
+```bash
+curl -X POST http://localhost:8000/api/file/update-original-text/ \
+  -d "creator_id=1" \
+  -d "id=1" \
+  -d "original_text=新的转写文本内容..."
+```
+
+更新走访对象和时间：
+
+```bash
+curl -X POST http://localhost:8000/api/file/update-original-text/ \
+  -d "creator_id=1" \
+  -d "id=1" \
+  -d "customer_name=新客户" \
+  -d "visit_time=2026-08-01"
+```
+
+### 数据库更新
+
+更新成功后，会更新 `api_visitrecord` 表中对应记录：
+
+| 字段 | 更新逻辑 |
+| :--- | :--- |
+| `original_text` | 更新为传入的录音转写文本内容（仅当传入时） |
+| `customer_name` | 更新为传入的走访对象名称（仅当传入时） |
+| `visit_time` | 更新为传入的走访时间（仅当传入时） |
+
+---
+
+## 8. 删除记录接口
+
+### 接口描述
+
+根据 `creator_id` 和 `id` 删除数据库 `api_visitrecord` 表中对应记录。
+
+### 请求信息
+
+- **URL**: `POST /api/file/delete-record/`
+- **Method**: `POST`
+
+### 请求参数
+
+| 参数名 | 类型 | 必填 | 默认值 | 说明 |
+| :--- | :--- | :--- | :--- | :--- |
+| `creator_id` | Integer | 是 | - | 创建人ID，需对应 `api_user` 表中存在的用户 |
+| `id` | Integer | 是 | - | 走访记录ID，需对应 `api_visitrecord` 表中存在的记录 |
+
+### 成功响应
+
+**Status Code**: `200 OK`
+
+```json
+{
+    "status": "success",
+    "message": "删除成功",
+    "record_id": 1
+}
+```
+
+### 失败响应
+
+**Status Code**: `400 Bad Request`
+
+```json
+{
+    "status": "error",
+    "message": "creator_id 和 id 不能为空"
 }
 ```
 
@@ -647,19 +738,10 @@ curl -X POST http://localhost:8000/api/file/record-detail/ \
 ### 示例请求
 
 ```bash
-curl -X POST http://localhost:8000/api/file/update-original-text/ \
+curl -X POST http://localhost:8000/api/file/delete-record/ \
   -d "creator_id=1" \
-  -d "id=1" \
-  -d "original_text=新的转写文本内容..."
+  -d "id=1"
 ```
-
-### 数据库更新
-
-更新成功后，会更新 `api_visitrecord` 表中对应记录：
-
-| 字段 | 更新逻辑 |
-| :--- | :--- |
-| `original_text` | 更新为传入的录音转写文本内容 |
 
 ---
 
@@ -669,7 +751,7 @@ curl -X POST http://localhost:8000/api/file/update-original-text/ \
 客户端上传文件 → 创建走访记录 → 调用语音转文字接口 → 建立WebSocket → 接收转写结果 → 调用总结接口
     ↓                    ↓                      ↓                ↓                    ↓
 POST /upload/         DB记录               POST /speech-to-text/   ws://localhost:8000/ws/asr/{job_id}/   POST /summarize/
-    ↓              (creator_id,              (creator_id, id)         ↓                    (id, record_id)
+    ↓              (creator_id,              (creator_id, id)         ↓                    (creator_id, id)
  上传到MinIO        id, audio_url)              ↓                  等待推送                  ↓
     ↓                                          ↓                    ↓                    查询DB获取original_text
  创建VisitRecord                           查询DB获取audio_url   转写结果                    ↓
@@ -816,8 +898,8 @@ ws.onclose = () => console.log('连接关闭');
 
 ```bash
 curl -X POST http://localhost:8000/api/file/summarize/ \
-  -d "id=1" \
-  -d "record_id=1"
+  -d "creator_id=1" \
+  -d "id=1"
 ```
 
 预期响应:
@@ -844,7 +926,10 @@ curl -X POST http://localhost:8000/api/file/record-ids/ \
 {
     "status": "success",
     "message": "获取成功",
-    "record_ids": [1, 2, 3]
+    "records": [
+        [1, "success", "张三", 120, "2026-07-20T10:30:00"],
+        [2, "pending", "李四", 60, "2026-07-21T14:15:00"]
+    ]
 }
 ```
 
