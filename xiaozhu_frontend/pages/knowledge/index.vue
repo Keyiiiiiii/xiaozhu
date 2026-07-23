@@ -19,8 +19,16 @@
           <view v-if="msg.role === 'ai'" class="avatar ai-avatar">助</view>
           <view :class="['msg-box', msg.role === 'ai' ? 'ai-msg' : 'user-msg']">
             <text class="msg-text">{{ msg.content }}</text>
+            <view v-if="msg.role === 'ai' && msg.source_files && msg.source_files.length > 0" class="source-files">
+              <text class="source-label">参考文件:</text>
+              <text v-for="(file, idx) in msg.source_files" :key="idx" class="source-file-name">{{ file }}</text>
+            </view>
             <view v-if="msg.role === 'ai' && msg.showActions" class="msg-actions">
-              <text class="action-link">查看源文件</text>
+              <text 
+                class="action-link" 
+                :class="{ 'action-link-disabled': !msg.file_records || msg.file_records.length === 0 }"
+                @click="showSourceFiles(msg)"
+              >查看源文件</text>
               <text class="action-divider">|</text>
               <text class="action-link">问题上报</text>
             </view>
@@ -55,6 +63,33 @@
         @click="onSend"
       >发送</view>
     </view>
+
+    <view v-if="showFileModal" class="modal-overlay" @click="closeFileModal">
+      <view class="modal-content" @click.stop>
+        <view class="modal-header">
+          <text class="modal-title">源文件列表</text>
+          <text class="modal-close" @click="closeFileModal">×</text>
+        </view>
+        <scroll-view class="file-list" scroll-y>
+          <view 
+            v-for="file in currentFiles" 
+            :key="file.id" 
+            class="file-item"
+            @click="openFile(file)"
+          >
+            <view class="file-icon">📄</view>
+            <view class="file-info">
+              <text class="file-name">{{ file.file_name }}</text>
+              <text class="file-size">{{ formatFileSize(file.file_size) }}</text>
+            </view>
+            <view class="file-arrow">→</view>
+          </view>
+          <view v-if="currentFiles.length === 0" class="empty-state">
+            <text>暂无匹配的源文件</text>
+          </view>
+        </scroll-view>
+      </view>
+    </view>
   </view>
 </template>
 
@@ -66,6 +101,8 @@ const messages = ref([
     role: 'ai',
     content: '您好，我是榕小助。您可以向我询问最新的资费政策、营销方案等业务问题。',
     showActions: false,
+    source_files: [],
+    file_records: [],
     timestamp: Date.now()
   }
 ])
@@ -74,6 +111,8 @@ const inputText = ref('')
 const loading = ref(false)
 const scrollToId = ref('')
 const pageHeight = ref(0)
+const showFileModal = ref(false)
+const currentFiles = ref([])
 
 onMounted(() => {
   const systemInfo = uni.getSystemInfoSync()
@@ -142,6 +181,8 @@ function onSend() {
     role: 'user',
     content: text,
     showActions: false,
+    source_files: [],
+    file_records: [],
     timestamp: Date.now()
   })
   
@@ -176,12 +217,16 @@ function onSend() {
           role: 'ai',
           content: `服务器返回错误 ${res.statusCode}，请稍后重试。`,
           showActions: false,
+          source_files: [],
+          file_records: [],
           timestamp: Date.now()
         })
         return
       }
       
       let replyContent = '抱歉，我暂时无法回答这个问题。'
+      let sourceFiles = []
+      let fileRecords = []
       
       if (res && res.data) {
         if (res.data.content) {
@@ -193,12 +238,21 @@ function onSend() {
         } else {
           replyContent = JSON.stringify(res.data)
         }
+        
+        if (res.data.source_files) {
+          sourceFiles = res.data.source_files
+        }
+        if (res.data.file_records) {
+          fileRecords = res.data.file_records
+        }
       }
       
       messages.value.push({
         role: 'ai',
         content: replyContent,
         showActions: true,
+        source_files: sourceFiles,
+        file_records: fileRecords,
         timestamp: Date.now()
       })
     },
@@ -208,10 +262,148 @@ function onSend() {
         role: 'ai',
         content: '网络连接失败，请稍后重试。',
         showActions: false,
+        source_files: [],
+        file_records: [],
         timestamp: Date.now()
       })
     }
   })
+}
+
+function showSourceFiles(msg) {
+  if (msg.file_records && msg.file_records.length > 0) {
+    currentFiles.value = msg.file_records
+    showFileModal.value = true
+  }
+}
+
+function closeFileModal() {
+  showFileModal.value = false
+  currentFiles.value = []
+}
+
+function openFile(file) {
+  uni.showLoading({ title: '下载中...' })
+  
+  // #ifdef H5
+  // H5端：使用fetch下载并通过a标签实现正确文件名
+  fetch(`/api/knowledge/download/${file.id}/`)
+    .then(response => response.blob())
+    .then(blob => {
+      const url = window.URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = file.file_name
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      window.URL.revokeObjectURL(url)
+      uni.hideLoading()
+    })
+    .catch(() => {
+      uni.hideLoading()
+      uni.showToast({ title: '下载失败', icon: 'none' })
+    })
+  // #endif
+  
+  // #ifndef H5
+  // 非H5端：使用uni.downloadFile
+  uni.downloadFile({
+    url: `/api/knowledge/download/${file.id}/`,
+    success: (res) => {
+      if (res.statusCode === 200) {
+        // #ifdef MP-WEIXIN
+        // 微信小程序：保存文件后再打开
+        const fs = wx.getFileSystemManager()
+        const savedPath = `${wx.env.USER_DATA_PATH}/${file.file_name}`
+        try {
+          fs.saveFileSync(res.tempFilePath, savedPath)
+          uni.openDocument({
+            filePath: savedPath,
+            fileType: getFileType(file.file_type, file.file_name),
+            showMenu: true,
+            success: () => { uni.hideLoading() },
+            fail: () => {
+              uni.hideLoading()
+              uni.showToast({ title: '无法打开文件', icon: 'none' })
+            }
+          })
+        } catch (e) {
+          uni.hideLoading()
+          uni.openDocument({
+            filePath: res.tempFilePath,
+            fileType: getFileType(file.file_type, file.file_name),
+            showMenu: true,
+            success: () => {},
+            fail: () => {
+              uni.showToast({ title: '无法打开文件', icon: 'none' })
+            }
+          })
+        }
+        // #endif
+        
+        // #ifndef MP-WEIXIN
+        // 其他平台：直接打开临时文件
+        uni.hideLoading()
+        uni.openDocument({
+          filePath: res.tempFilePath,
+          fileType: getFileType(file.file_type, file.file_name),
+          showMenu: true,
+          success: () => {},
+          fail: () => {
+            uni.showToast({ title: '无法打开文件', icon: 'none' })
+          }
+        })
+        // #endif
+      } else {
+        uni.hideLoading()
+        uni.showToast({ title: '下载失败', icon: 'none' })
+      }
+    },
+    fail: () => {
+      uni.hideLoading()
+      uni.showToast({ title: '下载失败', icon: 'none' })
+    }
+  })
+  // #endif
+}
+
+function getFileType(fileType, fileName) {
+  if (fileType) {
+    const ext = fileType.replace('.', '').toLowerCase()
+    const typeMap = {
+      'docx': 'doc',
+      'doc': 'doc',
+      'pdf': 'pdf',
+      'txt': 'txt',
+      'xlsx': 'xlsx',
+      'xls': 'xls',
+      'ppt': 'ppt',
+      'pptx': 'pptx'
+    }
+    return typeMap[ext] || 'doc'
+  }
+  if (fileName) {
+    const ext = fileName.split('.').pop().toLowerCase()
+    const typeMap = {
+      'docx': 'doc',
+      'doc': 'doc',
+      'pdf': 'pdf',
+      'txt': 'txt',
+      'xlsx': 'xlsx',
+      'xls': 'xls',
+      'ppt': 'ppt',
+      'pptx': 'pptx'
+    }
+    return typeMap[ext] || 'doc'
+  }
+  return 'doc'
+}
+
+function formatFileSize(bytes) {
+  if (bytes < 1024) return bytes + ' B'
+  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB'
+  return (bytes / (1024 * 1024)).toFixed(1) + ' MB'
 }
 </script>
 
@@ -385,5 +577,122 @@ function onSend() {
     transform: scale(1);
     opacity: 1;
   }
+}
+
+.source-files {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px dashed #f0f0f0;
+}
+
+.source-label {
+  font-size: 12px;
+  color: #999999;
+}
+
+.source-file-name {
+  font-size: 12px;
+  color: #0085d0;
+  margin-left: 8px;
+  margin-right: 8px;
+}
+
+.action-link-disabled {
+  color: #cccccc;
+}
+
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.modal-content {
+  width: 80%;
+  max-width: 320px;
+  background-color: #ffffff;
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px;
+  border-bottom: 1px solid #eeeeee;
+}
+
+.modal-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: #333333;
+}
+
+.modal-close {
+  font-size: 24px;
+  color: #999999;
+  line-height: 1;
+}
+
+.file-list {
+  max-height: 400px;
+  padding: 8px;
+}
+
+.file-item {
+  display: flex;
+  align-items: center;
+  padding: 12px;
+  border-radius: 8px;
+  margin-bottom: 4px;
+}
+
+.file-item:active {
+  background-color: #f5f6f8;
+}
+
+.file-icon {
+  font-size: 24px;
+  margin-right: 12px;
+}
+
+.file-info {
+  flex: 1;
+  overflow: hidden;
+}
+
+.file-name {
+  font-size: 14px;
+  color: #333333;
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.file-size {
+  font-size: 12px;
+  color: #999999;
+  margin-top: 4px;
+}
+
+.file-arrow {
+  font-size: 16px;
+  color: #cccccc;
+}
+
+.empty-state {
+  text-align: center;
+  padding: 40px 16px;
+  color: #999999;
+  font-size: 14px;
 }
 </style>

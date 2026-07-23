@@ -95,7 +95,7 @@ def call_knowledge_api_non_streaming(
 
 def extract_workflow_result(stream_output: str) -> dict:
     if not stream_output:
-        return {"content": "响应内容为空"}
+        return {"content": "响应内容为空", "source_files": []}
     
     text_patterns = [
         r'"text"\s*[:：]\s*["“](.*?)["”](?=\s*[,，}\)\]])',
@@ -103,32 +103,56 @@ def extract_workflow_result(stream_output: str) -> dict:
         r'"text"\s*[:：]\s*(.+?)(?=\s*["”])',
     ]
     
+    text_content = ""
     for pattern in text_patterns:
         matches = re.findall(pattern, stream_output, re.DOTALL)
         if matches:
             text_content = matches[0].strip()
-            if text_content:
-                return {"content": text_content}
+            break
     
-    data_patterns = [
-        r'"data"\s*[:：]\s*\(\s*\{(.*?)\}\s*\)',
-        r'"data"\s*[:：]\s*\((.*?)\)',
+    if not text_content:
+        data_patterns = [
+            r'"data"\s*[:：]\s*\(\s*\{(.*?)\}\s*\)',
+            r'"data"\s*[:：]\s*\((.*?)\)',
+        ]
+        
+        for pattern in data_patterns:
+            matches = re.findall(pattern, stream_output, re.DOTALL)
+            if matches:
+                inner_content = matches[0].strip()
+                for text_pattern in text_patterns:
+                    text_matches = re.findall(text_pattern, inner_content, re.DOTALL)
+                    if text_matches:
+                        text_content = text_matches[0].strip()
+                        break
+    
+    if not text_content:
+        chinese_pattern = r'[\u4e00-\u9fff]+[^\u4e00-\u9fff]*[\u4e00-\u9fff]+'
+        chinese_matches = re.findall(chinese_pattern, stream_output)
+        if chinese_matches:
+            text_content = "".join(chinese_matches[:50])
+    
+    if not text_content:
+        text_content = stream_output[:2000]
+    
+    source_files = extract_source_files(text_content)
+    
+    return {"content": text_content, "source_files": source_files}
+
+
+def extract_source_files(text_content: str) -> list:
+    source_files = []
+    
+    title_patterns = [
+        r'\*\*原文件标题\*\*[#：:]\s*(.+)',
+        r'原文件标题[#：:]\s*(.+)',
+        r'源文件[#：:]\s*(.+)',
+        r'参考文件[#：:]\s*(.+)',
     ]
     
-    for pattern in data_patterns:
-        matches = re.findall(pattern, stream_output, re.DOTALL)
-        if matches:
-            inner_content = matches[0].strip()
-            for text_pattern in text_patterns:
-                text_matches = re.findall(text_pattern, inner_content, re.DOTALL)
-                if text_matches:
-                    text_content = text_matches[0].strip()
-                    if text_content:
-                        return {"content": text_content}
+    for pattern in title_patterns:
+        matches = re.findall(pattern, text_content)
+        for match in matches:
+            source_files.append(match.strip())
     
-    chinese_pattern = r'[\u4e00-\u9fff]+[^\u4e00-\u9fff]*[\u4e00-\u9fff]+'
-    chinese_matches = re.findall(chinese_pattern, stream_output)
-    if chinese_matches:
-        return {"content": "".join(chinese_matches[:50])}
-    
-    return {"content": stream_output[:2000]}
+    return source_files
