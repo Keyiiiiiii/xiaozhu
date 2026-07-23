@@ -5,19 +5,34 @@
         <text class="back-icon">‹</text>
       </view>
       <text class="detail-title">走访详情</text>
-      <view class="header-placeholder"></view>
+      <view class="header-edit-btn" @click="toggleEdit">
+        <text class="header-edit-text">{{ isEditing ? '取消' : '编辑' }}</text>
+      </view>
     </view>
 
     <scroll-view class="detail-content" scroll-y>
       <view class="info-card">
         <view class="info-row">
           <text class="info-label">走访名称</text>
-          <text class="info-value">{{ record.name }}</text>
+          <view class="info-value-wrap">
+            <text class="info-value" v-if="!isEditing">{{ record.name }}</text>
+            <input
+              class="info-input"
+              v-else
+              v-model="editedName"
+              placeholder="请输入走访名称"
+            />
+          </view>
         </view>
         <view class="info-divider"></view>
         <view class="info-row">
           <text class="info-label">走访时间</text>
-          <text class="info-value">{{ record.visitTime }}</text>
+          <view class="info-value-wrap">
+            <text class="info-value" v-if="!isEditing">{{ record.visitTime }}</text>
+            <picker v-if="isEditing" mode="date" :value="editedTime" @change="onDateChange">
+              <view class="info-value picker-trigger">{{ editedTime || '请选择日期' }}</view>
+            </picker>
+          </view>
         </view>
         <view class="info-divider"></view>
         <view class="info-row">
@@ -58,9 +73,6 @@
         <view class="section-header">
           <view class="section-indicator"></view>
           <text class="section-title">录音转写</text>
-          <view class="section-action" v-if="record.content && !isEditing" @click="startEdit">
-            <text class="action-text">编辑</text>
-          </view>
         </view>
         <view class="transcript-content">
           <text class="transcript-text" v-if="!isEditing">{{ record.content || '暂无转写内容' }}</text>
@@ -73,15 +85,7 @@
             :maxlength="-1"
           />
         </view>
-        <view class="edit-btn-row" v-if="isEditing">
-          <button class="cancel-btn" @click="cancelEdit">
-            <text class="cancel-btn-text">取消</text>
-          </button>
-          <button class="save-btn" :disabled="isSaving || !editedContent" @click="saveEdit">
-            <text class="save-btn-text">{{ isSaving ? '保存中...' : '保存' }}</text>
-          </button>
-        </view>
-        <view class="summarize-btn-wrap" v-else>
+        <view class="summarize-btn-wrap" v-if="!isEditing">
           <button class="summarize-btn" :disabled="isSummarizing || !record.content" @click="handleSummarize">
             <text class="summarize-btn-text">{{ isSummarizing ? 'AI总结中...' : (aiSummary ? '重新生成总结' : '智能总结') }}</text>
           </button>
@@ -105,6 +109,12 @@
         </view>
       </view>
     </scroll-view>
+
+    <view class="bottom-save-bar" v-if="isEditing">
+      <button class="save-btn" :disabled="isSaving" @click="saveAllChanges">
+        <text class="save-btn-text">{{ isSaving ? '保存中...' : '保存修改' }}</text>
+      </button>
+    </view>
   </view>
 </template>
 
@@ -132,6 +142,8 @@ export default {
       aiSummary: '',
       isEditing: false,
       editedContent: '',
+      editedName: '',
+      editedTime: '',
       isSaving: false
     };
   },
@@ -202,9 +214,7 @@ export default {
           const year = d.getFullYear();
           const month = String(d.getMonth() + 1).padStart(2, '0');
           const day = String(d.getDate()).padStart(2, '0');
-          const hour = String(d.getHours()).padStart(2, '0');
-          const minute = String(d.getMinutes()).padStart(2, '0');
-          visitTime = `${year}-${month}-${day} ${hour}:${minute}`;
+          visitTime = `${year}-${month}-${day}`;
         }
       }
 
@@ -258,35 +268,82 @@ export default {
         this.isSummarizing = false;
       }
     },
-    startEdit() {
-      this.editedContent = this.record.content || '';
-      this.isEditing = true;
+    toggleEdit() {
+      if (this.isEditing) {
+        this.isEditing = false;
+        this.editedContent = '';
+        this.editedName = '';
+        this.editedTime = '';
+      } else {
+        this.editedContent = this.record.content || '';
+        this.editedName = this.record.name || '';
+        this.editedTime = this.record.visitTime ? this.record.visitTime.split(' ')[0] : '';
+        this.isEditing = true;
+      }
     },
-    cancelEdit() {
-      this.isEditing = false;
-      this.editedContent = '';
+    onDateChange(e) {
+      this.editedTime = e.detail.value;
     },
-    async saveEdit() {
-      if (this.isSaving || !this.editedContent) {
+    async saveAllChanges() {
+      if (this.isSaving) {
         return;
       }
       this.isSaving = true;
       try {
         const recordId = this.serverRecordId || this.record.recordId;
-        const newSegments = [{ text: this.editedContent }];
-        const originalTextJson = JSON.stringify(newSegments);
-        if (recordId) {
-          await updateOriginalText(recordId, 1, originalTextJson);
+        if (!recordId) {
+          uni.showToast({
+            title: '记录ID不存在',
+            icon: 'none'
+          });
+          return;
         }
-        this.record.content = this.editedContent;
-        this.record.originalSegments = newSegments;
-        this.updateLocalStorage();
-        uni.showToast({
-          title: '保存成功',
-          icon: 'success'
-        });
+
+        const updateData = {};
+
+        if (this.editedName.trim() && this.editedName.trim() !== this.record.name) {
+          updateData.customer_name = this.editedName.trim();
+        }
+
+        if (this.editedTime && this.editedTime !== (this.record.visitTime ? this.record.visitTime.split(' ')[0] : '')) {
+          updateData.visit_time = this.editedTime;
+        }
+
+        if (this.editedContent && this.editedContent !== this.record.content) {
+          const newSegments = [{ text: this.editedContent }];
+          updateData.original_text = JSON.stringify(newSegments);
+        }
+
+        if (Object.keys(updateData).length > 0) {
+          await updateOriginalText(recordId, 1, updateData);
+
+          if (updateData.customer_name) {
+            this.record.name = updateData.customer_name;
+          }
+          if (updateData.visit_time) {
+            this.record.visitTime = updateData.visit_time;
+          }
+          if (updateData.original_text) {
+            this.record.content = this.editedContent;
+            this.record.originalSegments = [{ text: this.editedContent }];
+          }
+
+          this.updateLocalStorage();
+          uni.showToast({
+            title: '保存成功',
+            icon: 'success'
+          });
+        } else {
+          uni.showToast({
+            title: '未修改任何内容',
+            icon: 'none'
+          });
+        }
+
         this.isEditing = false;
         this.editedContent = '';
+        this.editedName = '';
+        this.editedTime = '';
       } catch (e) {
         console.error('保存失败:', e);
         uni.showToast({
@@ -304,6 +361,8 @@ export default {
           const list = JSON.parse(historyData);
           const index = list.findIndex(item => item.id === this.recordId);
           if (index !== -1) {
+            list[index].name = this.record.name;
+            list[index].visitTime = this.record.visitTime;
             list[index].content = this.record.content;
             list[index].originalSegments = this.record.originalSegments;
             uni.setStorageSync('visit_history', JSON.stringify(list));
@@ -356,6 +415,16 @@ export default {
   color: #222222;
 }
 
+.header-edit-btn {
+  padding: 6px 16px;
+}
+
+.header-edit-text {
+  font-size: 15px;
+  color: #0099FF;
+  font-weight: 500;
+}
+
 .header-placeholder {
   width: 40px;
 }
@@ -390,8 +459,30 @@ export default {
   font-size: 14px;
   color: #333333;
   font-weight: 500;
-  max-width: 60%;
   text-align: right;
+}
+
+.info-value-wrap {
+  display: flex;
+  align-items: center;
+  flex: 1;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.info-input {
+  font-size: 14px;
+  color: #333333;
+  font-weight: 500;
+  text-align: right;
+  padding: 4px 8px;
+  border: 1px solid #0099FF;
+  border-radius: 4px;
+  background-color: #FFFFFF;
+}
+
+.picker-trigger {
+  color: #0099FF;
 }
 
 .info-divider {
@@ -669,5 +760,17 @@ export default {
 .processing-desc {
   font-size: 13px;
   color: #999999;
+}
+
+.bottom-save-bar {
+  padding: 16px;
+  padding-bottom: calc(16px + env(safe-area-inset-bottom));
+  background-color: #FFFFFF;
+  border-top: 1px solid #EEEEEE;
+  box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.05);
+}
+
+.bottom-save-bar .save-btn {
+  width: 100%;
 }
 </style>

@@ -13,6 +13,7 @@ const config = {
     recordIdsPath: "/api/file/record-ids/",
     recordDetailPath: "/api/file/record-detail/",
     updateOriginalTextPath: "/api/file/update-original-text/",
+    deleteRecordPath: "/api/file/delete-record/",
     wsBaseUrl: "ws://localhost:8001",
     wsPath: "/ws/asr/"
   },

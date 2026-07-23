@@ -96,21 +96,35 @@
         </view>
       </view>
       <view class="history-list">
-        <view class="history-card" v-for="(item, index) in historyList" :key="item.id" @click="goToDetail(item.id)">
-          <view class="history-card-head">
-            <text class="history-name">{{ item.name }}</text>
-            <text class="history-state" :class="item.status === 'done' ? 'state-done' : (item.status === 'failed' ? 'state-failed' : 'state-processing')">
-              {{ item.status === 'done' ? '已提取' : (item.status === 'failed' ? '转写失败' : '处理中') }}
-            </text>
+        <view class="swipe-card" v-for="(item, index) in historyList" :key="item.id">
+          <view class="swipe-delete-btn" @click="confirmDelete(item)">
+            <text class="swipe-delete-text">删除</text>
           </view>
-          <view class="history-card-body">
-            <view class="meta-row">
-              <text class="meta-label">走访时间：</text>
-              <text class="meta-val">{{ item.visitTime }}</text>
-            </view>
-            <view class="meta-row">
-              <text class="meta-label">沟通时长：</text>
-              <text class="meta-val">{{ item.durationText }}</text>
+          <view 
+            class="swipe-content" 
+            :style="{ transform: `translateX(${swipeOffsets[item.id] || 0}px)` }"
+            @touchstart="onTouchStart($event, item.id)"
+            @touchmove="onTouchMove($event, item.id)"
+            @touchend="onTouchEnd($event, item.id)"
+            @click="goToDetail(item.id)"
+          >
+            <view class="history-card">
+              <view class="history-card-head">
+                <text class="history-name">{{ item.name }}</text>
+                <text class="history-state" :class="item.status === 'done' ? 'state-done' : (item.status === 'failed' ? 'state-failed' : 'state-processing')">
+                  {{ item.status === 'done' ? '已提取' : (item.status === 'failed' ? '转写失败' : '处理中') }}
+                </text>
+              </view>
+              <view class="history-card-body">
+                <view class="meta-row">
+                  <text class="meta-label">走访时间：</text>
+                  <text class="meta-val">{{ item.visitTime }}</text>
+                </view>
+                <view class="meta-row">
+                  <text class="meta-label">沟通时长：</text>
+                  <text class="meta-val">{{ item.durationText }}</text>
+                </view>
+              </view>
             </view>
           </view>
         </view>
@@ -154,7 +168,7 @@
 import permission from "@/common/permission.js"
 // #endif
 import { getVoiceWsUrl } from "@/api/voice.js";
-import { uploadAudioFile, submitSpeechToText, connectAsrWebSocket, getRecordIds, getRecordDetail } from "@/api/file.js";
+import { uploadAudioFile, submitSpeechToText, connectAsrWebSocket, getRecordIds, getRecordDetail, deleteRecord } from "@/api/file.js";
 import { showNotification } from "@/common/notification.js";
 
 const FRAME = { FIRST: 0, CONTINUE: 1, LAST: 2 };
@@ -224,6 +238,11 @@ export default {
       
       // 历史记录列表
       historyList: [],
+      // 左划删除相关
+      swipeOffsets: {},
+      touchStartX: {},
+      touchStartY: {},
+      deleteRecordItem: null,
       // 编辑中的名称
       editingName: "",
       // 是否显示名称修改弹窗
@@ -972,9 +991,6 @@ export default {
         return;
       }
       
-      // 收起走访记录面板
-      this.transcriptCollapsed = true;
-      
       // 暂存当前录音数据
       const now = new Date();
       this.pendingRecord = {
@@ -983,7 +999,7 @@ export default {
         visitTime: this.formatDateTime(now),
         duration: this.recordDuration,
         durationText: this.formatDurationText(this.recordDuration),
-        content: this.recognizedText,
+        content: "",
         audioPath: this.savedAudioPath,
         isAudioUploaded: false,
         createTime: now.getTime()
@@ -1085,9 +1101,7 @@ export default {
       const year = date.getFullYear();
       const month = String(date.getMonth() + 1).padStart(2, '0');
       const day = String(date.getDate()).padStart(2, '0');
-      const hour = String(date.getHours()).padStart(2, '0');
-      const minute = String(date.getMinutes()).padStart(2, '0');
-      return `${year}-${month}-${day} ${hour}:${minute}`;
+      return `${year}-${month}-${day}`;
     },
     
     formatDurationText(seconds) {
@@ -1100,11 +1114,104 @@ export default {
     },
     
     goToDetail(id) {
+      if (this.swipeOffsets[id] && this.swipeOffsets[id] !== 0) {
+        this.closeSwipe(id);
+        return;
+      }
       const record = this.historyList.find(item => item.id === id);
       const recordIdParam = record && record.recordId ? `&recordId=${record.recordId}` : '';
       uni.navigateTo({
         url: `/pages/visit/detail?id=${id}${recordIdParam}`
       });
+    },
+
+    onTouchStart(e, id) {
+      this.touchStartX[id] = e.touches[0].clientX;
+      this.touchStartY[id] = e.touches[0].clientY;
+    },
+
+    onTouchMove(e, id) {
+      const deltaX = e.touches[0].clientX - this.touchStartX[id];
+      const deltaY = e.touches[0].clientY - this.touchStartY[id];
+
+      if (Math.abs(deltaY) > Math.abs(deltaX)) {
+        return;
+      }
+
+      let offset = Math.max(-80, Math.min(0, deltaX));
+      if (this.swipeOffsets[id] === -80 && deltaX < 0) {
+        offset = -80 + deltaX * 0.3;
+      }
+      this.$set(this.swipeOffsets, id, offset);
+    },
+
+    onTouchEnd(e, id) {
+      const deltaX = e.changedTouches[0].clientX - this.touchStartX[id];
+      if (deltaX < -40) {
+        this.$set(this.swipeOffsets, id, -80);
+      } else {
+        this.$set(this.swipeOffsets, id, 0);
+      }
+    },
+
+    closeSwipe(id) {
+      this.$set(this.swipeOffsets, id, 0);
+    },
+
+    closeAllSwipes() {
+      Object.keys(this.swipeOffsets).forEach(id => {
+        this.$set(this.swipeOffsets, id, 0);
+      });
+    },
+
+    confirmDelete(item) {
+      this.deleteRecordItem = item;
+      uni.showModal({
+        title: '确认删除',
+        content: `确定要删除走访记录「${item.name}」吗？`,
+        confirmText: '删除',
+        confirmColor: '#FF4D4F',
+        cancelText: '取消',
+        success: (res) => {
+          if (res.confirm) {
+            this.doDelete(item);
+          }
+        }
+      });
+    },
+
+    async doDelete(item) {
+      try {
+        uni.showLoading({
+          title: '删除中...',
+          mask: true
+        });
+
+        if (item.recordId) {
+          await deleteRecord(item.recordId, 1);
+        }
+
+        const index = this.historyList.findIndex(r => r.id === item.id);
+        if (index !== -1) {
+          this.historyList.splice(index, 1);
+          this.saveHistoryToStorage();
+        }
+
+        this.$set(this.swipeOffsets, item.id, 0);
+
+        uni.hideLoading();
+        uni.showToast({
+          title: '删除成功',
+          icon: 'success'
+        });
+      } catch (error) {
+        console.error('删除失败:', error);
+        uni.hideLoading();
+        uni.showToast({
+          title: error.message || '删除失败',
+          icon: 'none'
+        });
+      }
     },
 
     closeNameModal() {
@@ -1178,11 +1285,18 @@ export default {
         durationText = this.formatDurationText(duration);
       }
 
+      let status = "processing";
+      if (listRecord.status === "success") {
+        status = "done";
+      } else if (listRecord.status === "failed" || listRecord.status === "error") {
+        status = "failed";
+      }
+
       return {
         id: "record_" + listRecord.id,
         recordId: listRecord.id,
         name: listRecord.customer_name || "走访记录",
-        status: "processing",
+        status: status,
         visitTime: visitTime,
         duration: duration,
         durationText: durationText,
@@ -1862,7 +1976,6 @@ export default {
   background-color: #FFFFFF;
   border-radius: 8px;
   padding: 16px;
-  margin-bottom: 12px;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.02);
 }
 .history-card-head {
@@ -1918,5 +2031,36 @@ export default {
 .meta-val {
   font-size: 13px;
   color: #444444;
+}
+
+/* 左划删除 */
+.swipe-card {
+  position: relative;
+  overflow: hidden;
+  margin-bottom: 12px;
+  border-radius: 8px;
+}
+.swipe-delete-btn {
+  position: absolute;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  width: 80px;
+  background-color: #FF4D4F;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1;
+  border-radius: 0 10px 10px 0;
+}
+.swipe-delete-text {
+  color: #FFFFFF;
+  font-size: 15px;
+  font-weight: 500;
+}
+.swipe-content {
+  position: relative;
+  z-index: 2;
+  transition: transform 0.2s ease;
 }
 </style>

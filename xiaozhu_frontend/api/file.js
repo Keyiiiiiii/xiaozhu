@@ -168,9 +168,10 @@ export function getRecordIds(creatorId) {
           const records = res.data.records || [];
           const result = records.map(record => ({
             id: record[0],
-            customer_name: record[1],
-            duration_seconds: record[2],
-            visit_time: record[3]
+            status: record[1],
+            customer_name: record[2],
+            duration_seconds: record[3],
+            visit_time: record[4]
           }));
           resolve(result);
         } else {
@@ -184,12 +185,27 @@ export function getRecordIds(creatorId) {
   });
 }
 
-export function updateOriginalText(recordId, creatorId, originalText) {
+export function updateOriginalText(recordId, creatorId, data) {
   return new Promise((resolve, reject) => {
     const baseUrl = config.fileServer.baseUrl.replace(/\/+$/, "");
     const url = `${baseUrl}${config.fileServer.updateOriginalTextPath}`;
 
-    console.log("更新录音文本:", url, { id: recordId, creator_id: creatorId, original_text: originalText });
+    const requestData = {
+      creator_id: creatorId || 1,
+      id: recordId
+    };
+
+    if (data.original_text !== undefined) {
+      requestData.original_text = data.original_text;
+    }
+    if (data.customer_name !== undefined) {
+      requestData.customer_name = data.customer_name;
+    }
+    if (data.visit_time !== undefined) {
+      requestData.visit_time = data.visit_time;
+    }
+
+    console.log("更新走访记录:", url, requestData);
 
     uni.request({
       url: url,
@@ -197,11 +213,7 @@ export function updateOriginalText(recordId, creatorId, originalText) {
       header: {
         'content-type': 'application/x-www-form-urlencoded'
       },
-      data: {
-        creator_id: creatorId || 1,
-        id: recordId,
-        original_text: originalText
-      },
+      data: requestData,
       success: (res) => {
         if (res.statusCode === 200 && res.data && res.data.status === "success") {
           resolve({
@@ -209,7 +221,7 @@ export function updateOriginalText(recordId, creatorId, originalText) {
             message: res.data.message
           });
         } else {
-          reject(new Error((res.data && res.data.message) || "更新录音文本失败"));
+          reject(new Error((res.data && res.data.message) || "更新走访记录失败"));
         }
       },
       fail: (err) => {
@@ -241,6 +253,40 @@ export function getRecordDetail(recordId, creatorId) {
           resolve(res.data.data);
         } else {
           reject(new Error((res.data && res.data.message) || "获取记录详情失败"));
+        }
+      },
+      fail: (err) => {
+        reject(new Error(err.errMsg || "请求失败"));
+      }
+    });
+  });
+}
+
+export function deleteRecord(recordId, creatorId) {
+  return new Promise((resolve, reject) => {
+    const baseUrl = config.fileServer.baseUrl.replace(/\/+$/, "");
+    const url = `${baseUrl}${config.fileServer.deleteRecordPath}`;
+
+    console.log("删除走访记录:", url, { id: recordId, creator_id: creatorId });
+
+    uni.request({
+      url: url,
+      method: 'POST',
+      header: {
+        'content-type': 'application/x-www-form-urlencoded'
+      },
+      data: {
+        creator_id: creatorId || 1,
+        id: recordId
+      },
+      success: (res) => {
+        if (res.statusCode === 200 && res.data && res.data.status === "success") {
+          resolve({
+            recordId: res.data.record_id,
+            message: res.data.message
+          });
+        } else {
+          reject(new Error((res.data && res.data.message) || "删除走访记录失败"));
         }
       },
       fail: (err) => {
