@@ -111,8 +111,8 @@
             <view class="history-card">
               <view class="history-card-head">
                 <text class="history-name">{{ item.name }}</text>
-                <text class="history-state" :class="item.status === 'done' ? 'state-done' : (item.status === 'failed' ? 'state-failed' : 'state-processing')">
-                  {{ item.status === 'done' ? '已提取' : (item.status === 'failed' ? '转写失败' : '处理中') }}
+                <text class="history-state" :class="item.status === 'done' ? 'state-done' : (item.status === 'summarized' ? 'state-summarized' : (item.status === 'failed' ? 'state-failed' : 'state-processing'))">
+                  {{ item.status === 'done' ? '已提取' : (item.status === 'summarized' ? '已总结' : (item.status === 'failed' ? '转写失败' : '处理中')) }}
                 </text>
               </view>
               <view class="history-card-body">
@@ -1263,7 +1263,7 @@ export default {
       try {
         const records = await getRecordIds(1);
         this.historyList = records.map(r => this.mapListRecordToLocal(r)).sort((a, b) => {
-          return new Date(b.visitTime).getTime() - new Date(a.visitTime).getTime();
+          return parseInt(b.recordId) - parseInt(a.recordId);
         });
       } catch (e) {
         console.error("从API加载历史记录失败:", e);
@@ -1288,6 +1288,8 @@ export default {
       let status = "processing";
       if (listRecord.status === "success") {
         status = "done";
+      } else if (listRecord.status === "summarized") {
+        status = "summarized";
       } else if (listRecord.status === "failed" || listRecord.status === "error") {
         status = "failed";
       }
@@ -1330,6 +1332,8 @@ export default {
       let status = "processing";
       if (serverRecord.status === "success") {
         status = "done";
+      } else if (serverRecord.status === "summarized") {
+        status = "summarized";
       } else if (serverRecord.status === "failed" || serverRecord.status === "error") {
         status = "failed";
       }
@@ -2010,6 +2014,10 @@ export default {
 .state-processing {
   background-color: #FFF7E6;
   color: #FA8C16;
+}
+.state-summarized {
+  background-color: #E6F7FF;
+  color: #1890FF;
 }
 .history-card-body {
   display: flex;

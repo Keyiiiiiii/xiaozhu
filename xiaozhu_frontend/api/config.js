@@ -7,14 +7,17 @@ const config = {
   },
   fileServer: {
     baseUrl: "http://localhost:8001",
+    // baseUrl: "http://192.168.207.152:8001",
     uploadPath: "/api/file/upload/",
     speechToTextPath: "/api/file/speech-to-text/",
     summarizePath: "/api/file/summarize/",
     recordIdsPath: "/api/file/record-ids/",
     recordDetailPath: "/api/file/record-detail/",
+    getAudioFilePath: "/api/file/get-audio-file/",
     updateOriginalTextPath: "/api/file/update-original-text/",
     deleteRecordPath: "/api/file/delete-record/",
     wsBaseUrl: "ws://localhost:8001",
+    // wsBaseUrl: "ws://192.168.207.152:8001",
     wsPath: "/ws/asr/"
   },
   // TODO: 后端登录认证服务配置

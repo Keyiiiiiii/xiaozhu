@@ -262,6 +262,37 @@ export function getRecordDetail(recordId, creatorId) {
   });
 }
 
+export function fetchAudioData(recordId, creatorId) {
+  return new Promise((resolve, reject) => {
+    const baseUrl = config.fileServer.baseUrl.replace(/\/+$/, "");
+    const url = `${baseUrl}${config.fileServer.getAudioFilePath}`;
+
+    uni.request({
+      url: url,
+      method: 'POST',
+      responseType: 'arraybuffer',
+      header: {
+        'content-type': 'application/x-www-form-urlencoded'
+      },
+      data: {
+        creator_id: creatorId || 1,
+        id: recordId
+      },
+      success: (res) => {
+        if (res.statusCode === 200 && res.data) {
+          resolve(res.data);
+        } else {
+          const msg = res.data ? (typeof res.data === 'string' ? res.data : '获取音频失败') : '获取音频失败';
+          reject(new Error(msg));
+        }
+      },
+      fail: (err) => {
+        reject(new Error(err.errMsg || '获取音频失败'));
+      }
+    });
+  });
+}
+
 export function deleteRecord(recordId, creatorId) {
   return new Promise((resolve, reject) => {
     const baseUrl = config.fileServer.baseUrl.replace(/\/+$/, "");

@@ -42,8 +42,8 @@
         <view class="info-divider"></view>
         <view class="info-row">
           <text class="info-label">处理状态</text>
-          <text class="info-value status-tag" :class="record.status === 'done' ? 'tag-done' : (record.status === 'failed' ? 'tag-failed' : 'tag-processing')">
-            {{ record.status === 'done' ? '已提取' : (record.status === 'failed' ? '转写失败' : '处理中') }}
+          <text class="info-value status-tag" :class="record.status === 'done' ? 'tag-done' : (record.status === 'summarized' ? 'tag-summarized' : (record.status === 'failed' ? 'tag-failed' : 'tag-processing'))">
+            {{ record.status === 'done' ? '已提取' : (record.status === 'summarized' ? '已总结' : (record.status === 'failed' ? '转写失败' : '处理中')) }}
           </text>
         </view>
       </view>
@@ -54,15 +54,16 @@
           <text class="section-title">音频文件</text>
         </view>
         <view class="audio-player">
-          <view class="audio-play-btn">
-            <text class="audio-play-icon">▶</text>
+          <view class="audio-play-btn" @click="toggleAudioPlay">
+            <text class="audio-play-icon">{{ isAudioPlaying ? '❚❚' : '▶' }}</text>
           </view>
           <view class="audio-progress-wrap">
-            <view class="audio-progress-bar">
-              <view class="audio-progress-fill" :style="{ width: '30%' }"></view>
+            <view class="audio-progress-bar" @click="seekAudio">
+              <view class="audio-progress-fill" :style="{ width: progress + '%' }"></view>
+              <view class="audio-progress-thumb" :style="{ left: progress + '%' }"></view>
             </view>
             <view class="audio-time-row">
-              <text class="audio-time">01:23</text>
+              <text class="audio-time">{{ formatTime(currentTime) }}</text>
               <text class="audio-time">{{ record.durationText }}</text>
             </view>
           </view>
@@ -75,10 +76,37 @@
           <text class="section-title">录音转写</text>
         </view>
         <view class="transcript-content">
-          <text class="transcript-text" v-if="!isEditing">{{ record.content || '暂无转写内容' }}</text>
+          <view v-if="!isEditing && record.originalSegments && record.originalSegments.length > 0" class="chat-list">
+            <view v-for="(segment, index) in record.originalSegments" :key="index" class="chat-item" :class="getSpeakerClass(segment.speaker_label)">
+              <view class="chat-bubble">
+                <text v-if="shouldShowSpeaker(index, segment.speaker_label)" class="bubble-speaker">{{ formatSpeaker(segment.speaker_label) }}</text>
+                <view class="bubble-content">
+                  <text class="bubble-text">{{ segment.text || '' }}</text>
+                </view>
+                <view class="bubble-tail"></view>
+              </view>
+            </view>
+          </view>
+          <text v-else-if="!isEditing" class="transcript-text">{{ record.content || '暂无转写内容' }}</text>
+          <view v-else-if="editedSegments && editedSegments.length > 0" class="chat-list">
+            <view v-for="(segment, index) in editedSegments" :key="index" class="chat-item" :class="getSpeakerClass(segment.speaker_label)">
+              <view class="chat-bubble">
+                <text class="bubble-speaker">{{ formatSpeaker(segment.speaker_label) }}</text>
+                <textarea
+                  class="bubble-textarea"
+                  v-model="editedSegments[index].text"
+                  :auto-height="true"
+                  placeholder="请输入转写内容"
+                  :maxlength="-1"
+                  @input="handleSegmentInput(index)"
+                />
+                <view class="bubble-tail"></view>
+              </view>
+            </view>
+          </view>
           <textarea
-            class="transcript-textarea"
             v-else
+            class="transcript-textarea"
             v-model="editedContent"
             :auto-height="true"
             placeholder="请输入转写内容"
@@ -88,6 +116,9 @@
         <view class="summarize-btn-wrap" v-if="!isEditing">
           <button class="summarize-btn" :disabled="isSummarizing || !record.content" @click="handleSummarize">
             <text class="summarize-btn-text">{{ isSummarizing ? 'AI总结中...' : (aiSummary ? '重新生成总结' : '智能总结') }}</text>
+          </button>
+          <button class="retranscribe-btn" :disabled="isReTranscribing" @click="handleReTranscribe">
+            <text class="retranscribe-btn-text">{{ isReTranscribing ? '重新转写中...' : '重新转写' }}</text>
           </button>
         </view>
       </view>
@@ -119,7 +150,7 @@
 </template>
 
 <script>
-import { summarizeRecording, getRecordDetail, updateOriginalText } from '@/api/file.js';
+import { summarizeRecording, getRecordDetail, updateOriginalText, fetchAudioData, submitSpeechToText } from '@/api/file.js';
 
 export default {
   data() {
@@ -140,11 +171,19 @@ export default {
       },
       isSummarizing: false,
       aiSummary: '',
+      isReTranscribing: false,
       isEditing: false,
       editedContent: '',
+      editedSegments: [],
       editedName: '',
       editedTime: '',
-      isSaving: false
+      isSaving: false,
+      audioContext: null,
+      audioSrc: '',
+      isAudioPlaying: false,
+      currentTime: 0,
+      duration: 0,
+      progress: 0,
     };
   },
   onLoad(options) {
@@ -153,6 +192,19 @@ export default {
       this.serverRecordId = options.recordId ? Number(options.recordId) : null;
       this.loadRecordDetail();
     }
+  },
+  onShow() {
+    if (this.isAudioPlaying && this.audioContext) {
+      this.audioContext.play().catch(() => {});
+    }
+  },
+  onHide() {
+    if (this.audioContext) {
+      this.audioContext.pause();
+    }
+  },
+  onUnload() {
+    this.destroyAudio();
   },
   methods: {
     goBack() {
@@ -183,26 +235,31 @@ export default {
       let content = "";
       let originalSegments = null;
       if (serverRecord.original_text) {
-        let segments = serverRecord.original_text;
-        if (typeof segments === 'string') {
+        let data = serverRecord.original_text;
+        if (typeof data === 'string') {
           try {
-            segments = JSON.parse(segments);
+            data = JSON.parse(data);
           } catch (e) {
-            segments = null;
+            data = null;
             content = serverRecord.original_text;
           }
         }
-        if (Array.isArray(segments)) {
-          originalSegments = segments;
-          content = segments.map(s => s.text || "").join("");
-        } else if (!content && typeof segments === 'string') {
-          content = segments;
+        if (Array.isArray(data)) {
+          originalSegments = data;
+          content = data.map(s => s.text || "").join("");
+        } else if (data && typeof data === 'object' && data.segments && Array.isArray(data.segments)) {
+          originalSegments = data.segments;
+          content = data.segments.map(s => s.text || "").join("");
+        } else if (!content && typeof data === 'string') {
+          content = data;
         }
       }
 
       let status = "processing";
       if (serverRecord.status === "success") {
         status = "done";
+      } else if (serverRecord.status === "summarized") {
+        status = "summarized";
       } else if (serverRecord.status === "failed" || serverRecord.status === "error") {
         status = "failed";
       }
@@ -268,17 +325,112 @@ export default {
         this.isSummarizing = false;
       }
     },
+    async handleReTranscribe() {
+      if (this.isReTranscribing) {
+        return;
+      }
+      const recordId = this.serverRecordId || this.record.recordId;
+      if (!recordId) {
+        uni.showToast({
+          title: '记录ID不存在',
+          icon: 'none'
+        });
+        return;
+      }
+      this.isReTranscribing = true;
+      try {
+        await submitSpeechToText(recordId, 1);
+        uni.showToast({
+          title: '转写任务已提交',
+          icon: 'success'
+        });
+        this.record.status = 'processing';
+        this.record.content = '';
+        this.record.originalSegments = null;
+        this.aiSummary = '';
+        this.updateLocalStorage();
+        setTimeout(() => {
+          this.loadRecordDetail();
+        }, 3000);
+      } catch (e) {
+        console.error('重新转写失败:', e);
+        uni.showToast({
+          title: e.message || '转写失败',
+          icon: 'none'
+        });
+      } finally {
+        this.isReTranscribing = false;
+      }
+    },
     toggleEdit() {
       if (this.isEditing) {
         this.isEditing = false;
         this.editedContent = '';
+        this.editedSegments = [];
         this.editedName = '';
         this.editedTime = '';
       } else {
         this.editedContent = this.record.content || '';
+        if (this.record.originalSegments && this.record.originalSegments.length > 0) {
+          this.editedSegments = JSON.parse(JSON.stringify(this.record.originalSegments));
+        } else {
+          this.editedSegments = [];
+        }
         this.editedName = this.record.name || '';
         this.editedTime = this.record.visitTime ? this.record.visitTime.split(' ')[0] : '';
         this.isEditing = true;
+      }
+    },
+    formatSpeaker(speakerLabel) {
+      if (!speakerLabel) {
+        return '未知';
+      }
+      if (speakerLabel.startsWith('speaker_')) {
+        const num = speakerLabel.replace('speaker_', '');
+        return `说话人${num}`;
+      }
+      return speakerLabel;
+    },
+    getSpeakerClass(speakerLabel) {
+      if (!speakerLabel) {
+        return 'speaker-unknown';
+      }
+      if (speakerLabel.startsWith('speaker_')) {
+        const num = parseInt(speakerLabel.replace('speaker_', ''));
+        return `speaker-${num % 3 + 1}`;
+      }
+      return 'speaker-unknown';
+    },
+    formatSegmentTime(seconds) {
+      if (!seconds || isNaN(seconds)) {
+        return '--:--';
+      }
+      const mins = Math.floor(seconds / 60);
+      const secs = Math.floor(seconds % 60);
+      return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+    },
+    shouldShowSpeaker(index, currentSpeaker) {
+      if (index === 0) {
+        return true;
+      }
+      const segments = this.isEditing ? this.editedSegments : this.record.originalSegments;
+      if (!segments || segments.length <= index) {
+        return true;
+      }
+      const prevSegment = segments[index - 1];
+      const prevSpeaker = prevSegment ? prevSegment.speaker_label : null;
+      return prevSpeaker !== currentSpeaker;
+    },
+    handleSegmentInput(index) {
+      if (!this.editedSegments || !this.editedSegments[index]) {
+        return;
+      }
+      const text = this.editedSegments[index].text;
+      if (!text || text.trim() === '') {
+        this.editedSegments.splice(index, 1);
+        if (this.editedSegments.length === 0) {
+          this.editedContent = '';
+        }
       }
     },
     onDateChange(e) {
@@ -309,7 +461,15 @@ export default {
           updateData.visit_time = this.editedTime;
         }
 
-        if (this.editedContent && this.editedContent !== this.record.content) {
+        if (this.editedSegments && this.editedSegments.length > 0) {
+          const hasContentChanges = this.editedSegments.some((seg, idx) => {
+            const original = this.record.originalSegments && this.record.originalSegments[idx];
+            return !original || seg.text !== original.text;
+          });
+          if (hasContentChanges) {
+            updateData.original_text = JSON.stringify(this.editedSegments);
+          }
+        } else if (this.editedContent && this.editedContent !== this.record.content) {
           const newSegments = [{ text: this.editedContent }];
           updateData.original_text = JSON.stringify(newSegments);
         }
@@ -324,8 +484,13 @@ export default {
             this.record.visitTime = updateData.visit_time;
           }
           if (updateData.original_text) {
-            this.record.content = this.editedContent;
-            this.record.originalSegments = [{ text: this.editedContent }];
+            if (this.editedSegments && this.editedSegments.length > 0) {
+              this.record.content = this.editedSegments.map(s => s.text || '').join('');
+              this.record.originalSegments = JSON.parse(JSON.stringify(this.editedSegments));
+            } else {
+              this.record.content = this.editedContent;
+              this.record.originalSegments = [{ text: this.editedContent }];
+            }
           }
 
           this.updateLocalStorage();
@@ -342,6 +507,7 @@ export default {
 
         this.isEditing = false;
         this.editedContent = '';
+        this.editedSegments = [];
         this.editedName = '';
         this.editedTime = '';
       } catch (e) {
@@ -371,6 +537,187 @@ export default {
       } catch (e) {
         console.error('更新本地存储失败:', e);
       }
+    },
+    formatTime(seconds) {
+      const mins = Math.floor(seconds / 60);
+      const secs = Math.floor(seconds % 60);
+      return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+    },
+    async initAudio() {
+      if (this.audioContext) {
+        return;
+      }
+      const recordId = this.serverRecordId || this.record.recordId;
+      if (!recordId) {
+        uni.showToast({
+          title: '无法获取音频文件',
+          icon: 'none'
+        });
+        return;
+      }
+
+      try {
+        uni.showLoading({ title: '加载音频...' });
+        const audioData = await fetchAudioData(recordId, 1);
+        
+        let audioSrc = '';
+        // #ifdef H5
+        const blob = new Blob([audioData], { type: 'audio/m4a' });
+        audioSrc = URL.createObjectURL(blob);
+        this.audioSrc = audioSrc;
+        // #endif
+        
+        // #ifndef H5
+        const fs = uni.getFileSystemManager();
+        const tempFilePath = `${uni.env.USER_DATA_PATH}/audio_${recordId}_${Date.now()}.m4a`;
+        fs.writeFile({
+          filePath: tempFilePath,
+          data: audioData,
+          encoding: 'binary',
+          success: () => {
+            audioSrc = tempFilePath;
+            this.createAudioContext(audioSrc);
+            uni.hideLoading();
+          },
+          fail: (err) => {
+            console.error('写入音频文件失败:', err);
+            uni.hideLoading();
+            uni.showToast({ title: '音频加载失败', icon: 'none' });
+          }
+        });
+        return;
+        // #endif
+        
+        this.createAudioContext(audioSrc);
+        uni.hideLoading();
+      } catch (e) {
+        console.error('获取音频数据失败:', e);
+        uni.hideLoading();
+        uni.showToast({ title: e.message || '音频加载失败', icon: 'none' });
+      }
+    },
+    createAudioContext(src) {
+      this.audioContext = uni.createInnerAudioContext();
+      this.audioContext.src = src;
+      this.audioContext.autoplay = false;
+      this.audioContext.loop = false;
+      
+      this.audioContext.onCanplay(() => {
+        this.duration = this.audioContext.duration || 0;
+        console.log('音频可播放，时长:', this.duration);
+      });
+      
+      this.audioContext.onPlay(() => {
+        this.isAudioPlaying = true;
+        this.startProgressTimer();
+      });
+      
+      this.audioContext.onPause(() => {
+        this.isAudioPlaying = false;
+        this.stopProgressTimer();
+      });
+      
+      this.audioContext.onEnded(() => {
+        this.isAudioPlaying = false;
+        this.currentTime = 0;
+        this.progress = 0;
+        this.stopProgressTimer();
+      });
+      
+      this.audioContext.onError((err) => {
+        console.error('音频播放错误:', err);
+        this.isAudioPlaying = false;
+        this.stopProgressTimer();
+        uni.showToast({
+          title: '音频播放失败',
+          icon: 'none'
+        });
+      });
+      
+      this.audioContext.onTimeUpdate(() => {
+        this.currentTime = this.audioContext.currentTime || 0;
+        if (this.duration > 0) {
+          this.progress = (this.currentTime / this.duration) * 100;
+        }
+      });
+    },
+    toggleAudioPlay() {
+      const recordId = this.serverRecordId || this.record.recordId;
+      if (!recordId) {
+        uni.showToast({
+          title: '没有音频文件',
+          icon: 'none'
+        });
+        return;
+      }
+      
+      this.initAudio();
+      
+      if (this.isAudioPlaying) {
+        this.audioContext.pause();
+      } else {
+        this.audioContext.play().catch((err) => {
+          console.error('播放失败:', err);
+          uni.showToast({
+            title: '播放失败',
+            icon: 'none'
+          });
+        });
+      }
+    },
+    seekAudio(e) {
+      if (!this.audioContext || !this.duration) {
+        return;
+      }
+      
+      const touch = e.touches ? e.touches[0] : e;
+      const query = uni.createSelectorQuery();
+      query.select('.audio-progress-bar').boundingClientRect((rect) => {
+        if (rect) {
+          const percent = (touch.clientX - rect.left) / rect.width;
+          const newTime = Math.max(0, Math.min(this.duration, percent * this.duration));
+          this.audioContext.seek(newTime);
+        }
+      }).exec();
+    },
+    startProgressTimer() {
+      if (this.progressTimer) {
+        return;
+      }
+      this.progressTimer = setInterval(() => {
+        if (this.audioContext && this.isAudioPlaying) {
+          this.currentTime = this.audioContext.currentTime || 0;
+          if (this.duration > 0) {
+            this.progress = (this.currentTime / this.duration) * 100;
+          }
+        }
+      }, 100);
+    },
+    stopProgressTimer() {
+      if (this.progressTimer) {
+        clearInterval(this.progressTimer);
+        this.progressTimer = null;
+      }
+    },
+    destroyAudio() {
+      this.stopProgressTimer();
+      if (this.audioContext) {
+        try {
+          this.audioContext.destroy();
+        } catch (e) {
+          console.error('销毁音频上下文失败:', e);
+        }
+        this.audioContext = null;
+      }
+      // #ifdef H5
+      if (this.audioSrc && this.audioSrc.startsWith('blob:')) {
+        URL.revokeObjectURL(this.audioSrc);
+        this.audioSrc = '';
+      }
+      // #endif
+      this.isAudioPlaying = false;
+      this.currentTime = 0;
+      this.progress = 0;
     }
   }
 };
@@ -510,6 +857,10 @@ export default {
   background-color: #FFF7E6;
   color: #FA8C16;
 }
+.tag-summarized {
+  background-color: #E6F7FF;
+  color: #1890FF;
+}
 
 .section-card {
   background-color: #FFFFFF;
@@ -592,12 +943,24 @@ export default {
   background-color: #E2E8F0;
   border-radius: 2px;
   overflow: hidden;
+  position: relative;
 }
 
 .audio-progress-fill {
   height: 100%;
   background: linear-gradient(90deg, #0099FF 0%, #0077B3 100%);
   border-radius: 2px;
+}
+.audio-progress-thumb {
+  position: absolute;
+  top: 50%;
+  width: 12px;
+  height: 12px;
+  background-color: #FFFFFF;
+  border-radius: 50%;
+  border: 2px solid #0099FF;
+  transform: translate(-50%, -50%);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
 }
 
 .audio-time-row {
@@ -635,6 +998,127 @@ export default {
   outline: none;
   padding: 0;
   box-sizing: border-box;
+}
+
+.chat-list {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.chat-item {
+  display: flex;
+  position: relative;
+  width: 100%;
+}
+
+.chat-bubble {
+  position: relative;
+  width: 100%;
+  border-radius: 0 16px 16px 16px;
+  padding: 12px 16px;
+  box-sizing: border-box;
+}
+
+.bubble-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.bubble-speaker {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.bubble-time {
+  font-size: 11px;
+  color: rgba(0, 0, 0, 0.4);
+}
+
+.bubble-content {
+  position: relative;
+}
+
+.bubble-text {
+  font-size: 14px;
+  line-height: 1.6;
+  color: #333333;
+}
+
+.bubble-tail {
+  position: absolute;
+  left: -8px;
+  top: 20px;
+  width: 0;
+  height: 0;
+  border-top: 12px solid transparent;
+  border-right: 12px solid;
+}
+
+.bubble-textarea {
+  width: 100%;
+  min-height: 60px;
+  max-height: 200px;
+  font-size: 14px;
+  line-height: 1.6;
+  color: #333333;
+  background-color: rgba(255, 255, 255, 0.6);
+  border: 1px solid rgba(0, 0, 0, 0.1);
+  border-radius: 8px;
+  outline: none;
+  padding: 8px 10px;
+  box-sizing: border-box;
+  overflow-y: auto;
+}
+
+.chat-item.speaker-1 .chat-bubble {
+  background-color: #E6F7FF;
+}
+
+.chat-item.speaker-1 .bubble-speaker {
+  color: #1890FF;
+}
+
+.chat-item.speaker-1 .bubble-tail {
+  border-right-color: #E6F7FF;
+}
+
+.chat-item.speaker-2 .chat-bubble {
+  background-color: #F6FFED;
+}
+
+.chat-item.speaker-2 .bubble-speaker {
+  color: #52C41A;
+}
+
+.chat-item.speaker-2 .bubble-tail {
+  border-right-color: #F6FFED;
+}
+
+.chat-item.speaker-3 .chat-bubble {
+  background-color: #FFF7E6;
+}
+
+.chat-item.speaker-3 .bubble-speaker {
+  color: #FA8C16;
+}
+
+.chat-item.speaker-3 .bubble-tail {
+  border-right-color: #FFF7E6;
+}
+
+.chat-item.speaker-unknown .chat-bubble {
+  background-color: #F5F5F5;
+}
+
+.chat-item.speaker-unknown .bubble-speaker {
+  color: #999999;
+}
+
+.chat-item.speaker-unknown .bubble-tail {
+  border-right-color: #F5F5F5;
 }
 
 .edit-btn-row {
@@ -704,6 +1188,28 @@ export default {
 
 .summarize-btn-text {
   color: #FFFFFF;
+  font-size: 15px;
+  font-weight: 500;
+}
+
+.retranscribe-btn {
+  width: 100%;
+  height: 44px;
+  background-color: #FFFFFF;
+  border: 1px solid #0099FF;
+  border-radius: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-top: 12px;
+}
+
+.retranscribe-btn[disabled] {
+  opacity: 0.6;
+}
+
+.retranscribe-btn-text {
+  color: #0099FF;
   font-size: 15px;
   font-weight: 500;
 }
