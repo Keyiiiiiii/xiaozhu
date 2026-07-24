@@ -6,7 +6,7 @@ import requests
 from io import BytesIO
 from datetime import datetime
 import mutagen
-from django.http import JsonResponse
+from django.http import JsonResponse, HttpResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
 from django.conf import settings
@@ -498,3 +498,46 @@ def delete_record(request):
         "message": "删除成功",
         "record_id": record_id
     })
+
+
+@csrf_exempt
+@require_POST
+def get_audio_file(request):
+    creator_id = int(request.POST.get("creator_id", 0))
+    record_id = int(request.POST.get("id", 0))
+
+    if not creator_id or not record_id:
+        return JsonResponse({
+            "status": "error",
+            "message": "creator_id 和 id 不能为空"
+        }, status=400)
+
+    try:
+        visit_record = VisitRecord.objects.get(id=record_id, creator_id=creator_id)
+    except VisitRecord.DoesNotExist:
+        return JsonResponse({
+            "status": "error",
+            "message": f"走访记录 ID={record_id}, creator_id={creator_id} 不存在"
+        }, status=400)
+
+    audio_url = visit_record.audio_url
+    if not audio_url:
+        return JsonResponse({
+            "status": "error",
+            "message": "该走访记录没有关联的音频文件"
+        }, status=400)
+
+    minio_result = get_file_from_minio(audio_url)
+    if not minio_result["success"]:
+        return JsonResponse({
+            "status": "error",
+            "message": f"从MinIO获取文件失败: {minio_result['error']}"
+        }, status=500)
+
+    file_content = minio_result["content"]
+    object_name = minio_result["object_name"]
+    content_type = get_content_type(object_name)
+
+    response = HttpResponse(file_content, content_type=content_type)
+    response["Content-Disposition"] = f"inline; filename={object_name}"
+    return response

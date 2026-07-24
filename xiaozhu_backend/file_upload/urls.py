@@ -9,4 +9,5 @@ urlpatterns = [
     path("record-detail/", views.get_record_detail, name="get_record_detail"),
     path("update-original-text/", views.update_original_text, name="update_original_text"),
     path("delete-record/", views.delete_record, name="delete_record"),
+    path("get-audio-file/", views.get_audio_file, name="get_audio_file"),
 ]

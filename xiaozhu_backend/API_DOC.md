@@ -45,6 +45,8 @@ curl -X POST http://localhost:8000/api/file/update-original-text/ \
 
 curl -X POST http://localhost:8000/api/file/delete-record/ -d "creator_id=1" -d "id=1"
 
+curl -X POST http://localhost:8000/api/file/get-audio-file/ -d "creator_id=1" -d "id=1"
+
 # 5、WebSocket连接获取转写结果：
 ws://localhost:8000/ws/asr/{job_id}/
 ```
@@ -746,6 +748,113 @@ curl -X POST http://localhost:8000/api/file/update-original-text/ \
 curl -X POST http://localhost:8000/api/file/delete-record/ \
   -d "creator_id=1" \
   -d "id=1"
+```
+
+---
+
+## 9. 获取音频文件接口
+
+### 接口描述
+
+根据 `creator_id` 和 `id` 从数据库 `api_visitrecord` 表中获取对应的音频文件 URL，从 MinIO 存储中读取音频文件并返回给前端，支持直接播放。
+
+### 请求信息
+
+- **URL**: `POST /api/file/get-audio-file/`
+- **Method**: `POST`
+
+### 请求参数
+
+| 参数名 | 类型 | 必填 | 默认值 | 说明 |
+| :--- | :--- | :--- | :--- | :--- |
+| `creator_id` | Integer | 是 | - | 创建人ID，需对应 `api_user` 表中存在的用户 |
+| `id` | Integer | 是 | - | 走访记录ID，需对应 `api_visitrecord` 表中存在的记录 |
+
+### 成功响应
+
+**Status Code**: `200 OK`
+
+成功时直接返回音频文件二进制流，浏览器可直接播放。响应头包含：
+
+| 响应头 | 说明 |
+| :--- | :--- |
+| `Content-Type` | 根据文件扩展名自动识别，支持 `audio/m4a`、`audio/mpeg`、`audio/wav`、`audio/ogg`、`audio/flac` |
+| `Content-Disposition` | `inline; filename={文件名}`，表示内联播放 |
+
+### 失败响应
+
+**Status Code**: `400 Bad Request`
+
+```json
+{
+    "status": "error",
+    "message": "creator_id 和 id 不能为空"
+}
+```
+
+```json
+{
+    "status": "error",
+    "message": "走访记录 ID=1, creator_id=1 不存在"
+}
+```
+
+```json
+{
+    "status": "error",
+    "message": "该走访记录没有关联的音频文件"
+}
+```
+
+**Status Code**: `500 Internal Server Error`
+
+```json
+{
+    "status": "error",
+    "message": "从MinIO获取文件失败: S3Error: ..."
+}
+```
+
+### 示例请求
+
+```bash
+curl -X POST http://localhost:8000/api/file/get-audio-file/ \
+  -d "creator_id=1" \
+  -d "id=1" \
+  -o audio.m4a
+```
+
+### 前端使用示例
+
+**JavaScript**:
+
+```javascript
+// 获取音频文件并播放
+async function playAudio(recordId, creatorId) {
+    const response = await fetch('/api/file/get-audio-file/', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/x-www-form-urlencoded'
+        },
+        body: `creator_id=${creatorId}&id=${recordId}`
+    });
+
+    if (!response.ok) {
+        const error = await response.json();
+        console.error('获取音频失败:', error.message);
+        return;
+    }
+
+    const blob = await response.blob();
+    const audioUrl = URL.createObjectURL(blob);
+    
+    const audio = new Audio(audioUrl);
+    audio.play();
+    
+    audio.onended = () => {
+        URL.revokeObjectURL(audioUrl);
+    };
+}
 ```
 
 ---
