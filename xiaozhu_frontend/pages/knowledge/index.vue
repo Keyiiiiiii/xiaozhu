@@ -18,11 +18,12 @@
         <view :class="['msg-row', msg.role === 'ai' ? 'ai-row' : 'user-row']">
           <view v-if="msg.role === 'ai'" class="avatar ai-avatar">助</view>
           <view :class="['msg-box', msg.role === 'ai' ? 'ai-msg' : 'user-msg']">
-            <text class="msg-text">{{ msg.content }}</text>
-            <view v-if="msg.role === 'ai' && msg.source_files && msg.source_files.length > 0" class="source-files">
-              <text class="source-label">参考文件:</text>
-              <text v-for="(file, idx) in msg.source_files" :key="idx" class="source-file-name">{{ file }}</text>
-            </view>
+            <rich-text 
+              v-if="msg.role === 'ai'" 
+              class="msg-text" 
+              :nodes="msg.htmlContent || msg.content"
+            ></rich-text>
+            <text v-else class="msg-text">{{ msg.content }}</text>
             <view v-if="msg.role === 'ai' && msg.showActions" class="msg-actions">
               <text 
                 class="action-link" 
@@ -250,6 +251,7 @@ function onSend() {
       messages.value.push({
         role: 'ai',
         content: replyContent,
+        htmlContent: markdownToHtml(replyContent),
         showActions: true,
         source_files: sourceFiles,
         file_records: fileRecords,
@@ -404,6 +406,96 @@ function formatFileSize(bytes) {
   if (bytes < 1024) return bytes + ' B'
   if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB'
   return (bytes / (1024 * 1024)).toFixed(1) + ' MB'
+}
+
+function markdownToHtml(text) {
+  if (!text) return ''
+  
+  let html = text
+  
+  // 先处理双重转义的格式 $\\rightarrow$
+  html = html.replace(/\\rightarrow/g, '→')
+  html = html.replace(/\\leftarrow/g, '←')
+  html = html.replace(/\\Rightarrow/g, '⇒')
+  html = html.replace(/\\Leftarrow/g, '⇐')
+  html = html.replace(/\\leftrightarrow/g, '↔')
+  html = html.replace(/\\Leftrightarrow/g, '⇔')
+  html = html.replace(/\\uparrow/g, '↑')
+  html = html.replace(/\\downarrow/g, '↓')
+  html = html.replace(/\\times/g, '×')
+  html = html.replace(/\\div/g, '÷')
+  html = html.replace(/\\leq/g, '≤')
+  html = html.replace(/\\geq/g, '≥')
+  html = html.replace(/\\neq/g, '≠')
+  html = html.replace(/\\infty/g, '∞')
+  html = html.replace(/\\alpha/g, 'α')
+  html = html.replace(/\\beta/g, 'β')
+  html = html.replace(/\\gamma/g, 'γ')
+  html = html.replace(/\\delta/g, 'δ')
+  html = html.replace(/\\theta/g, 'θ')
+  html = html.replace(/\\pi/g, 'π')
+  html = html.replace(/\\sigma/g, 'σ')
+  html = html.replace(/\\omega/g, 'ω')
+  
+  // 再处理 LaTeX 公式中的 $...$ 格式
+  html = html.replace(/\$→\$/g, '→')
+  html = html.replace(/\$←\$/g, '←')
+  html = html.replace(/\$⇒\$/g, '⇒')
+  html = html.replace(/\$⇐\$/g, '⇐')
+  html = html.replace(/\$↔\$/g, '↔')
+  html = html.replace(/\$⇔\$/g, '⇔')
+  html = html.replace(/\$↑\$/g, '↑')
+  html = html.replace(/\$↓\$/g, '↓')
+  html = html.replace(/\$×\$/g, '×')
+  html = html.replace(/\$÷\$/g, '÷')
+  html = html.replace(/\$≤\$/g, '≤')
+  html = html.replace(/\$≥\$/g, '≥')
+  html = html.replace(/\$≠\$/g, '≠')
+  html = html.replace(/\$∞\$/g, '∞')
+  html = html.replace(/\$α\$/g, 'α')
+  html = html.replace(/\$β\$/g, 'β')
+  html = html.replace(/\$γ\$/g, 'γ')
+  html = html.replace(/\$δ\$/g, 'δ')
+  html = html.replace(/\$θ\$/g, 'θ')
+  html = html.replace(/\$π\$/g, 'π')
+  html = html.replace(/\$σ\$/g, 'σ')
+  html = html.replace(/\$ω\$/g, 'ω')
+  
+  // 处理剩余的 $...$（移除美元符号）
+  html = html.replace(/\$/g, '')
+  
+  // 处理行内代码 `code`
+  html = html.replace(/`([^`]+)`/g, '<code style="background:#f0f0f0;padding:2px 4px;border-radius:3px;font-family:monospace;">$1</code>')
+  
+  // 处理 **粗体**
+  html = html.replace(/\*\*([^*]+)\*\*/g, '<strong style="font-weight:bold;">$1</strong>')
+  
+  // 处理 *斜体*
+  html = html.replace(/\*([^*]+)\*/g, '<em style="font-style:italic;">$1</em>')
+  
+  // 处理 __粗体__
+  html = html.replace(/__([^_]+)__/g, '<strong style="font-weight:bold;">$1</strong>')
+  
+  // 处理 _斜体_
+  html = html.replace(/_([^_]+)_/g, '<em style="font-style:italic;">$1</em>')
+  
+  // 处理换行符（实际的换行符）
+  html = html.replace(/\n/g, '<br/>')
+  html = html.replace(/\\n/g, '<br/>')
+  
+  // 处理列表 - 数字列表
+  html = html.replace(/^(\d+)\.\s+(.+)$/gm, '<li>$2</li>')
+  
+  // 处理列表 - 无序列表
+  html = html.replace(/^\*\s+(.+)$/gm, '<li style="list-style-type:disc;">$1</li>')
+  html = html.replace(/^-\s+(.+)$/gm, '<li style="list-style-type:disc;">$1</li>')
+  
+  // 处理标题
+  html = html.replace(/^###\s+(.+)$/gm, '<h3 style="font-size:14px;font-weight:bold;margin:10px 0;">$1</h3>')
+  html = html.replace(/^##\s+(.+)$/gm, '<h2 style="font-size:16px;font-weight:bold;margin:10px 0;">$1</h2>')
+  html = html.replace(/^#\s+(.+)$/gm, '<h1 style="font-size:18px;font-weight:bold;margin:10px 0;">$1</h1>')
+  
+  return html
 }
 </script>
 
