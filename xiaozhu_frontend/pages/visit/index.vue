@@ -90,13 +90,13 @@
     <view class="history-panel">
       <view class="panel-head">
         <text class="panel-title">最近走访</text>
-        <view class="panel-filter">
-          <text class="filter-text">筛选</text>
+        <view class="panel-filter" @click="openFilterModal">
+          <text class="filter-text">{{ getFilterLabel() }}</text>
           <text class="filter-icon">▼</text>
         </view>
       </view>
       <view class="history-list">
-        <view class="swipe-card" v-for="(item, index) in historyList" :key="item.id">
+        <view class="swipe-card" v-for="(item, index) in filteredHistoryList" :key="item.id">
           <view class="swipe-delete-btn" @click="confirmDelete(item)">
             <text class="swipe-delete-text">删除</text>
           </view>
@@ -128,8 +128,8 @@
             </view>
           </view>
         </view>
-        <view class="empty-history" v-if="historyList.length === 0">
-          <text class="empty-text">暂无走访记录</text>
+        <view class="empty-history" v-if="filteredHistoryList.length === 0">
+          <text class="empty-text">{{ filterStatus === 'all' ? '暂无走访记录' : '该状态下暂无记录' }}</text>
         </view>
       </view>
     </view>
@@ -160,6 +160,29 @@
       </view>
     </view>
 
+    <!-- 筛选弹窗 -->
+    <view class="modal-mask" v-if="showFilterModal" @click="closeFilterModal">
+      <view class="filter-modal-content" @click.stop>
+        <view class="filter-modal-header">
+          <text class="filter-modal-title">筛选状态</text>
+          <text class="filter-modal-close" @click="closeFilterModal">×</text>
+        </view>
+        <view class="filter-modal-body">
+          <view 
+            class="filter-option" 
+            :class="{ 'filter-option-active': filterStatus === option.value }"
+            v-for="option in filterOptions" 
+            :key="option.value"
+            @click="selectFilter(option.value)"
+          >
+            <view class="filter-option-radio">
+              <view class="filter-option-dot" v-if="filterStatus === option.value"></view>
+            </view>
+            <text class="filter-option-text">{{ option.label }}</text>
+          </view>
+        </view>
+      </view>
+    </view>
   </view>
 </template>
 
@@ -256,6 +279,16 @@ export default {
       isUploading: false,
       asrWebSocketMap: null,
       isAsrProcessing: false,
+      
+      showFilterModal: false,
+      filterStatus: 'all',
+      filterOptions: [
+        { value: 'all', label: '全部' },
+        { value: 'processing', label: '处理中' },
+        { value: 'done', label: '已提取' },
+        { value: 'summarized', label: '已总结' },
+        { value: 'failed', label: '转写失败' }
+      ],
     };
   },
   computed: {
@@ -267,6 +300,12 @@ export default {
         return this.isRecognizing ? '正在识别...长按按钮结束录音' : '录音中...长按按钮结束录音';
       }
       return '点击上方按钮开始录音';
+    },
+    filteredHistoryList() {
+      if (this.filterStatus === 'all') {
+        return this.historyList;
+      }
+      return this.historyList.filter(item => item.status === this.filterStatus);
     },
   },
   methods: {
@@ -1561,6 +1600,24 @@ export default {
       }
       // #endif
     },
+    
+    openFilterModal() {
+      this.showFilterModal = true;
+    },
+    
+    closeFilterModal() {
+      this.showFilterModal = false;
+    },
+    
+    selectFilter(status) {
+      this.filterStatus = status;
+      this.closeFilterModal();
+    },
+    
+    getFilterLabel() {
+      const option = this.filterOptions.find(o => o.value === this.filterStatus);
+      return option ? option.label : '筛选';
+    },
   },
   onLoad() {
     this.loadHistoryFromApi().then(() => {
@@ -2070,5 +2127,75 @@ export default {
   position: relative;
   z-index: 2;
   transition: transform 0.2s ease;
+}
+
+/* 筛选弹窗样式 */
+.filter-modal-content {
+  width: 80%;
+  max-width: 320px;
+  background-color: #FFFFFF;
+  border-radius: 16px;
+  overflow: hidden;
+}
+.filter-modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16px 20px;
+  border-bottom: 1px solid #F0F0F0;
+}
+.filter-modal-title {
+  font-size: 17px;
+  font-weight: 600;
+  color: #222222;
+}
+.filter-modal-close {
+  font-size: 24px;
+  color: #999999;
+  line-height: 1;
+  padding: 0 8px;
+}
+.filter-modal-body {
+  padding: 12px 0;
+}
+.filter-option {
+  display: flex;
+  align-items: center;
+  padding: 14px 20px;
+  transition: background-color 0.2s ease;
+}
+.filter-option:active {
+  background-color: #F5F7FA;
+}
+.filter-option-active {
+  background-color: #F0F7FF;
+}
+.filter-option-radio {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border: 2px solid #DDDDDD;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  margin-right: 12px;
+  flex-shrink: 0;
+}
+.filter-option-active .filter-option-radio {
+  border-color: #0099FF;
+}
+.filter-option-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background-color: #0099FF;
+}
+.filter-option-text {
+  font-size: 15px;
+  color: #333333;
+}
+.filter-option-active .filter-option-text {
+  color: #0099FF;
+  font-weight: 500;
 }
 </style>
