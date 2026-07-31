@@ -162,27 +162,28 @@ def upload_knowledge_file(request):
         if not uploaded_file.name:
             continue
 
-        _, ext = os.path.splitext(uploaded_file.name)
+        # 分离文件名和扩展名
+        base_name, ext = os.path.splitext(uploaded_file.name)
+        file_ext = ext.lstrip('.')  # 移除点号，如 "pdf", "docx"
         object_name = f"{uuid.uuid4().hex}{ext}"
 
         result = upload_file_to_minio(uploaded_file, object_name)
 
         if result["success"]:
             file_size = uploaded_file.size
-            file_type = uploaded_file.content_type
 
             knowledge_file = KnowledgeFile.objects.create(
-                file_name=uploaded_file.name,
+                file_name=base_name,  # 只保存文件名，不含扩展名
                 file_url=result["url"],
                 file_size=file_size,
-                file_type=file_type
+                file_type=file_ext  # 保存扩展名，如 "pdf", "docx"
             )
 
             saved_records.append({
-                "file_name": uploaded_file.name,
+                "file_name": f"{base_name}{ext}",  # 返回完整文件名供前端显示
                 "file_url": result["url"],
                 "file_size": file_size,
-                "file_type": file_type,
+                "file_type": file_ext,
                 "record_id": knowledge_file.id
             })
         else:
