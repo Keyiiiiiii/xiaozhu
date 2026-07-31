@@ -467,11 +467,11 @@ export default {
             return !original || seg.text !== original.text;
           });
           if (hasContentChanges) {
-            updateData.original_text = JSON.stringify({ segments: this.editedSegments });
+            updateData.original_text = JSON.stringify(this.editedSegments);
           }
         } else if (this.editedContent && this.editedContent !== this.record.content) {
           const newSegments = [{ text: this.editedContent }];
-          updateData.original_text = JSON.stringify({ segments: newSegments });
+          updateData.original_text = JSON.stringify(newSegments);
         }
 
         if (Object.keys(updateData).length > 0) {
