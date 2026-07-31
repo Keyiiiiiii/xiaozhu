@@ -1,4 +1,5 @@
 import config from "./config.js";
+import { request, getAuthHeader } from "./request.js";
 
 function buildUrl(serverConfig) {
   const baseUrl = serverConfig.baseUrl.replace(/\/+$/, "");
@@ -17,6 +18,7 @@ function uploadFileH5(url, file, formData) {
 
     fetch(url, {
       method: "POST",
+      headers: getAuthHeader(),
       body: fd
     })
       .then(response => response.json().then(data => ({ data, ok: response.ok })))
@@ -43,6 +45,7 @@ function uploadFileUni(url, filePath, formData) {
       filePath: filePath,
       name: 'file',
       formData: formData || {},
+      header: getAuthHeader(),
       success: (res) => {
         try {
           const data = JSON.parse(res.data);
@@ -79,251 +82,154 @@ export function uploadAudioFile(filePath, formData, fileObject) {
   return uploadFileUni(url, filePath, formData);
 }
 
-export function submitSpeechToText(recordId, creatorId) {
-  return new Promise((resolve, reject) => {
-    const baseUrl = config.fileServer.baseUrl.replace(/\/+$/, "");
-    const url = `${baseUrl}${config.fileServer.speechToTextPath}`;
+export function submitSpeechToText(recordId) {
+  const baseUrl = config.fileServer.baseUrl.replace(/\/+$/, "");
+  const url = `${baseUrl}${config.fileServer.speechToTextPath}`;
 
-    console.log("提交语音转文字任务:", url, { record_id: recordId, creator_id: creatorId });
-
-    uni.request({
-      url: url,
-      method: 'POST',
-      header: {
-        'content-type': 'application/x-www-form-urlencoded'
-      },
-      data: {
-        creator_id: creatorId || 1,
-        id: recordId
-      },
-      success: (res) => {
-        if (res.statusCode === 200 && res.data && res.data.status === "success") {
-          resolve({
-            job_id: res.data.job_id,
-            record_id: res.data.record_id
-          });
-        } else {
-          reject(new Error((res.data && res.data.message) || "提交转写任务失败"));
-        }
-      },
-      fail: (err) => {
-        reject(new Error(err.errMsg || "请求失败"));
-      }
-    });
-  });
-}
-
-export function summarizeRecording(recordId, creatorId) {
-  return new Promise((resolve, reject) => {
-    const baseUrl = config.fileServer.baseUrl.replace(/\/+$/, "");
-    const url = `${baseUrl}${config.fileServer.summarizePath}`;
-
-    console.log("提交智能总结任务:", url, { record_id: recordId, id: creatorId });
-
-    uni.request({
-      url: url,
-      method: 'POST',
-      header: {
-        'content-type': 'application/x-www-form-urlencoded'
-      },
-      data: {
-        creator_id: creatorId || 1,
-        id: recordId
-      },
-      success: (res) => {
-        if (res.statusCode === 200 && res.data && res.data.status === "success") {
-          resolve({
-            aiSummary: res.data.ai_summary,
-            recordId: res.data.record_id
-          });
-        } else {
-          reject(new Error((res.data && res.data.message) || "智能总结失败"));
-        }
-      },
-      fail: (err) => {
-        reject(new Error(err.errMsg || "请求失败"));
-      }
-    });
-  });
-}
-
-export function getRecordIds(creatorId) {
-  return new Promise((resolve, reject) => {
-    const baseUrl = config.fileServer.baseUrl.replace(/\/+$/, "");
-    const url = `${baseUrl}${config.fileServer.recordIdsPath}`;
-
-    console.log("获取记录列表:", url, { creator_id: creatorId });
-
-    uni.request({
-      url: url,
-      method: 'POST',
-      header: {
-        'content-type': 'application/x-www-form-urlencoded'
-      },
-      data: {
-        creator_id: creatorId || 1
-      },
-      success: (res) => {
-        if (res.statusCode === 200 && res.data && res.data.status === "success") {
-          const records = res.data.records || [];
-          const result = records.map(record => ({
-            id: record[0],
-            status: record[1],
-            customer_name: record[2],
-            duration_seconds: record[3],
-            visit_time: record[4]
-          }));
-          resolve(result);
-        } else {
-          reject(new Error((res.data && res.data.message) || "获取记录列表失败"));
-        }
-      },
-      fail: (err) => {
-        reject(new Error(err.errMsg || "请求失败"));
-      }
-    });
-  });
-}
-
-export function updateOriginalText(recordId, creatorId, data) {
-  return new Promise((resolve, reject) => {
-    const baseUrl = config.fileServer.baseUrl.replace(/\/+$/, "");
-    const url = `${baseUrl}${config.fileServer.updateOriginalTextPath}`;
-
-    const requestData = {
-      creator_id: creatorId || 1,
-      id: recordId
-    };
-
-    if (data.original_text !== undefined) {
-      requestData.original_text = data.original_text;
+  return request({
+    url,
+    method: 'POST',
+    header: { 'content-type': 'application/x-www-form-urlencoded' },
+    data: { id: recordId }
+  }).then((res) => {
+    if (res.data && res.data.status === "success") {
+      return {
+        job_id: res.data.job_id,
+        record_id: res.data.record_id
+      };
     }
-    if (data.customer_name !== undefined) {
-      requestData.customer_name = data.customer_name;
+    throw new Error((res.data && res.data.message) || "提交转写任务失败");
+  });
+}
+
+export function summarizeRecording(recordId) {
+  const baseUrl = config.fileServer.baseUrl.replace(/\/+$/, "");
+  const url = `${baseUrl}${config.fileServer.summarizePath}`;
+
+  return request({
+    url,
+    method: 'POST',
+    header: { 'content-type': 'application/x-www-form-urlencoded' },
+    data: { id: recordId }
+  }).then((res) => {
+    if (res.data && res.data.status === "success") {
+      return {
+        aiSummary: res.data.ai_summary,
+        recordId: res.data.record_id
+      };
     }
-    if (data.visit_time !== undefined) {
-      requestData.visit_time = data.visit_time;
+    throw new Error((res.data && res.data.message) || "智能总结失败");
+  });
+}
+
+export function getRecordIds() {
+  const baseUrl = config.fileServer.baseUrl.replace(/\/+$/, "");
+  const url = `${baseUrl}${config.fileServer.recordIdsPath}`;
+
+  return request({
+    url,
+    method: 'POST',
+    header: { 'content-type': 'application/x-www-form-urlencoded' },
+    data: {}
+  }).then((res) => {
+    if (res.data && res.data.status === "success") {
+      const records = res.data.records || [];
+      return records.map(record => ({
+        id: record[0],
+        status: record[1],
+        customer_name: record[2],
+        duration_seconds: record[3],
+        visit_time: record[4]
+      }));
     }
-
-    console.log("更新走访记录:", url, requestData);
-
-    uni.request({
-      url: url,
-      method: 'POST',
-      header: {
-        'content-type': 'application/x-www-form-urlencoded'
-      },
-      data: requestData,
-      success: (res) => {
-        if (res.statusCode === 200 && res.data && res.data.status === "success") {
-          resolve({
-            recordId: res.data.record_id,
-            message: res.data.message
-          });
-        } else {
-          reject(new Error((res.data && res.data.message) || "更新走访记录失败"));
-        }
-      },
-      fail: (err) => {
-        reject(new Error(err.errMsg || "请求失败"));
-      }
-    });
+    throw new Error((res.data && res.data.message) || "获取记录列表失败");
   });
 }
 
-export function getRecordDetail(recordId, creatorId) {
-  return new Promise((resolve, reject) => {
-    const baseUrl = config.fileServer.baseUrl.replace(/\/+$/, "");
-    const url = `${baseUrl}${config.fileServer.recordDetailPath}`;
+export function updateOriginalText(recordId, data) {
+  const baseUrl = config.fileServer.baseUrl.replace(/\/+$/, "");
+  const url = `${baseUrl}${config.fileServer.updateOriginalTextPath}`;
 
-    console.log("获取记录详情:", url, { id: recordId, creator_id: creatorId });
+  const requestData = { id: recordId };
 
-    uni.request({
-      url: url,
-      method: 'POST',
-      header: {
-        'content-type': 'application/x-www-form-urlencoded'
-      },
-      data: {
-        creator_id: creatorId || 1,
-        id: recordId
-      },
-      success: (res) => {
-        if (res.statusCode === 200 && res.data && res.data.status === "success") {
-          resolve(res.data.data);
-        } else {
-          reject(new Error((res.data && res.data.message) || "获取记录详情失败"));
-        }
-      },
-      fail: (err) => {
-        reject(new Error(err.errMsg || "请求失败"));
-      }
-    });
+  if (data.original_text !== undefined) {
+    requestData.original_text = data.original_text;
+  }
+  if (data.customer_name !== undefined) {
+    requestData.customer_name = data.customer_name;
+  }
+  if (data.visit_time !== undefined) {
+    requestData.visit_time = data.visit_time;
+  }
+
+  return request({
+    url,
+    method: 'POST',
+    header: { 'content-type': 'application/x-www-form-urlencoded' },
+    data: requestData
+  }).then((res) => {
+    if (res.data && res.data.status === "success") {
+      return {
+        recordId: res.data.record_id,
+        message: res.data.message
+      };
+    }
+    throw new Error((res.data && res.data.message) || "更新走访记录失败");
   });
 }
 
-export function fetchAudioData(recordId, creatorId) {
-  return new Promise((resolve, reject) => {
-    const baseUrl = config.fileServer.baseUrl.replace(/\/+$/, "");
-    const url = `${baseUrl}${config.fileServer.getAudioFilePath}`;
+export function getRecordDetail(recordId) {
+  const baseUrl = config.fileServer.baseUrl.replace(/\/+$/, "");
+  const url = `${baseUrl}${config.fileServer.recordDetailPath}`;
 
-    uni.request({
-      url: url,
-      method: 'POST',
-      responseType: 'arraybuffer',
-      header: {
-        'content-type': 'application/x-www-form-urlencoded'
-      },
-      data: {
-        creator_id: creatorId || 1,
-        id: recordId
-      },
-      success: (res) => {
-        if (res.statusCode === 200 && res.data) {
-          resolve(res.data);
-        } else {
-          const msg = res.data ? (typeof res.data === 'string' ? res.data : '获取音频失败') : '获取音频失败';
-          reject(new Error(msg));
-        }
-      },
-      fail: (err) => {
-        reject(new Error(err.errMsg || '获取音频失败'));
-      }
-    });
+  return request({
+    url,
+    method: 'POST',
+    header: { 'content-type': 'application/x-www-form-urlencoded' },
+    data: { id: recordId }
+  }).then((res) => {
+    if (res.data && res.data.status === "success") {
+      return res.data.data;
+    }
+    throw new Error((res.data && res.data.message) || "获取记录详情失败");
   });
 }
 
-export function deleteRecord(recordId, creatorId) {
-  return new Promise((resolve, reject) => {
-    const baseUrl = config.fileServer.baseUrl.replace(/\/+$/, "");
-    const url = `${baseUrl}${config.fileServer.deleteRecordPath}`;
+export function fetchAudioData(recordId) {
+  const baseUrl = config.fileServer.baseUrl.replace(/\/+$/, "");
+  const url = `${baseUrl}${config.fileServer.getAudioFilePath}`;
 
-    console.log("删除走访记录:", url, { id: recordId, creator_id: creatorId });
+  return request({
+    url,
+    method: 'POST',
+    responseType: 'arraybuffer',
+    header: { 'content-type': 'application/x-www-form-urlencoded' },
+    data: { id: recordId }
+  }).then((res) => {
+    if (res.data) {
+      return res.data;
+    }
+    throw new Error('获取音频失败');
+  });
+}
 
-    uni.request({
-      url: url,
-      method: 'POST',
-      header: {
-        'content-type': 'application/x-www-form-urlencoded'
-      },
-      data: {
-        creator_id: creatorId || 1,
-        id: recordId
-      },
-      success: (res) => {
-        if (res.statusCode === 200 && res.data && res.data.status === "success") {
-          resolve({
-            recordId: res.data.record_id,
-            message: res.data.message
-          });
-        } else {
-          reject(new Error((res.data && res.data.message) || "删除走访记录失败"));
-        }
-      },
-      fail: (err) => {
-        reject(new Error(err.errMsg || "请求失败"));
-      }
-    });
+export function deleteRecord(recordId) {
+  const baseUrl = config.fileServer.baseUrl.replace(/\/+$/, "");
+  const url = `${baseUrl}${config.fileServer.deleteRecordPath}`;
+
+  return request({
+    url,
+    method: 'POST',
+    header: { 'content-type': 'application/x-www-form-urlencoded' },
+    data: { id: recordId }
+  }).then((res) => {
+    if (res.data && res.data.status === "success") {
+      return {
+        recordId: res.data.record_id,
+        message: res.data.message
+      };
+    }
+    throw new Error((res.data && res.data.message) || "删除走访记录失败");
   });
 }
 

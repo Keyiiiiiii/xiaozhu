@@ -15,7 +15,8 @@ from channels.layers import get_channel_layer
 from asgiref.sync import async_to_sync
 from .minio_client import upload_file_to_minio, get_file_from_minio
 from .askApi import call_llm_api, parse_llm_response, API_URL, API_KEY
-from api.models import VisitRecord, User
+from api.models import VisitRecord
+from api.auth_utils import get_user_from_request
 
 AUDIO_CONTENT_TYPES = {
     ".m4a": "audio/m4a",
@@ -36,6 +37,16 @@ STATUS_MAP = {
 def get_content_type(object_name):
     _, ext = os.path.splitext(object_name)
     return AUDIO_CONTENT_TYPES.get(ext.lower(), "audio/m4a")
+
+
+def _auth_or_401(request):
+    user = get_user_from_request(request)
+    if user is None:
+        return None, JsonResponse(
+            {"status": "error", "message": "未登录或 token 无效"},
+            status=401,
+        )
+    return user, None
 
 
 @csrf_exempt
@@ -67,7 +78,10 @@ def upload_file(request):
     result = upload_file_to_minio(uploaded_file, object_name)
 
     if result["success"]:
-        creator_id = int(request.POST.get("creator_id", 1))
+        user, auth_error = _auth_or_401(request)
+        if auth_error:
+            return auth_error
+
         customer_name = request.POST.get("customer_name", "cus")
         visit_time_str = request.POST.get("visit_time", "2026-07-01")
         status = int(request.POST.get("status", 1))
@@ -80,16 +94,8 @@ def upload_file(request):
 
         status_str = STATUS_MAP.get(status, "pending")
 
-        try:
-            creator = User.objects.get(id=creator_id)
-        except User.DoesNotExist:
-            return JsonResponse({
-                "status": "error",
-                "message": f"用户ID {creator_id} 不存在"
-            }, status=400)
-
         visit_record = VisitRecord.objects.create(
-            creator=creator,
+            creator=user,
             customer_name=customer_name,
             audio_url=result["url"],
             visit_time=visit_time,
@@ -211,7 +217,11 @@ def poll_asr_job(job_id, record_id, headers):
 @csrf_exempt
 @require_POST
 def speech_to_text(request):
-    creator_id = int(request.POST.get("creator_id", 1))
+    user, auth_error = _auth_or_401(request)
+    if auth_error:
+        return auth_error
+
+    creator_id = user.id
     record_id = int(request.POST.get("id", 1))
 
     try:
@@ -283,13 +293,17 @@ def speech_to_text(request):
 @csrf_exempt
 @require_POST
 def summarize_record(request):
-    creator_id = int(request.POST.get("creator_id", 0))
+    user, auth_error = _auth_or_401(request)
+    if auth_error:
+        return auth_error
+
+    creator_id = user.id
     record_id = int(request.POST.get("id", 0))
 
-    if not creator_id or not record_id:
+    if not record_id:
         return JsonResponse({
             "status": "error",
-            "message": "id 和 creator_id 不能为空。"
+            "message": "id 不能为空。"
         }, status=400)
 
     try:
@@ -345,13 +359,11 @@ def summarize_record(request):
 @csrf_exempt
 @require_POST
 def get_record_ids(request):
-    creator_id = int(request.POST.get("creator_id", 0))
+    user, auth_error = _auth_or_401(request)
+    if auth_error:
+        return auth_error
 
-    if not creator_id:
-        return JsonResponse({
-            "status": "error",
-            "message": "creator_id 不能为空"
-        }, status=400)
+    creator_id = user.id
 
     records = VisitRecord.objects.filter(creator_id=creator_id)
     record_list = []
@@ -375,13 +387,17 @@ def get_record_ids(request):
 @csrf_exempt
 @require_POST
 def get_record_detail(request):
-    creator_id = int(request.POST.get("creator_id", 0))
+    user, auth_error = _auth_or_401(request)
+    if auth_error:
+        return auth_error
+
+    creator_id = user.id
     record_id = int(request.POST.get("id", 0))
 
-    if not creator_id or not record_id:
+    if not record_id:
         return JsonResponse({
             "status": "error",
-            "message": "creator_id 和 id 不能为空"
+            "message": "id 不能为空"
         }, status=400)
 
     try:
@@ -414,17 +430,20 @@ def get_record_detail(request):
 @csrf_exempt
 @require_POST
 def update_original_text(request):
-    creator_id = int(request.POST.get("creator_id", 0))
+    user, auth_error = _auth_or_401(request)
+    if auth_error:
+        return auth_error
+
+    creator_id = user.id
     record_id = int(request.POST.get("id", 0))
     original_text = request.POST.get("original_text", "")
     customer_name = request.POST.get("customer_name", "")
     visit_time_str = request.POST.get("visit_time", "")
-    
 
-    if not creator_id or not record_id:
+    if not record_id:
         return JsonResponse({
             "status": "error",
-            "message": "creator_id 和 id 不能为空"
+            "message": "id 不能为空"
         }, status=400)
 
     if not original_text.strip() and not customer_name.strip() and not visit_time_str.strip():
@@ -474,13 +493,17 @@ def update_original_text(request):
 @csrf_exempt
 @require_POST
 def delete_record(request):
-    creator_id = int(request.POST.get("creator_id"))
-    record_id = int(request.POST.get("id"))
+    user, auth_error = _auth_or_401(request)
+    if auth_error:
+        return auth_error
 
-    if not creator_id or not record_id:
+    creator_id = user.id
+    record_id = int(request.POST.get("id", 0))
+
+    if not record_id:
         return JsonResponse({
             "status": "error",
-            "message": "creator_id 和 id 不能为空"
+            "message": "id 不能为空"
         }, status=400)
 
     try:
@@ -503,13 +526,17 @@ def delete_record(request):
 @csrf_exempt
 @require_POST
 def get_audio_file(request):
-    creator_id = int(request.POST.get("creator_id", 0))
+    user, auth_error = _auth_or_401(request)
+    if auth_error:
+        return auth_error
+
+    creator_id = user.id
     record_id = int(request.POST.get("id", 0))
 
-    if not creator_id or not record_id:
+    if not record_id:
         return JsonResponse({
             "status": "error",
-            "message": "creator_id 和 id 不能为空"
+            "message": "id 不能为空"
         }, status=400)
 
     try:

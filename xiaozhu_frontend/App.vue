@@ -5,6 +5,8 @@
 	import {
 		version
 	} from './package.json'
+	import loginApi from '@/api/login.js'
+	import { clearAuthStorage } from '@/api/request.js'
 	// #ifdef APP
 	import checkUpdate from '@/uni_modules/uni-upgrade-center-app/utils/check-update';
 	// #endif
@@ -23,10 +25,16 @@
 			console.log('App Launch');
 
 			const token = uni.getStorageSync('token');
-			const userInfo = uni.getStorageSync('userInfo');
-			if (token && userInfo) {
-				this.setUserInfo(userInfo);
-				this.login('storage');
+			if (token) {
+				loginApi.getCurrentUser()
+					.then((userInfo) => {
+						uni.setStorageSync('userInfo', userInfo);
+						this.setUserInfo(userInfo);
+						this.login('storage');
+					})
+					.catch(() => {
+						clearAuthStorage();
+					});
 			}
 
 			// #ifdef APP-PLUS

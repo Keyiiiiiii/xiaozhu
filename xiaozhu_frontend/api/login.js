@@ -1,60 +1,82 @@
 import config from './config.js';
+import { request, clearAuthStorage } from './request.js';
 
-// TODO: 连接后端登录接口
-// 替换硬编码验证为后端API调用
+function buildAuthUrl(path) {
+  const baseUrl = config.authServer.baseUrl.replace(/\/+$/, '');
+  return `${baseUrl}${path}`;
+}
+
 const loginApi = {
   login(username, password) {
-    return new Promise((resolve, reject) => {
-      // TODO: 替换为真实后端接口请求
-      // uni.request({
-      //   url: config.authServer.baseUrl + '/api/auth/login',
-      //   method: 'POST',
-      //   data: { username, password },
-      //   success: (res) => {
-      //     if (res.data.code === 0) {
-      //       resolve(res.data.data);
-      //     } else {
-      //       reject(new Error(res.data.message || '登录失败'));
-      //     }
-      //   },
-      //   fail: (err) => {
-      //     reject(err);
-      //   }
-      // });
-
-      // 临时硬编码验证
-      setTimeout(() => {
-        if (username === 'admin' && password === '123456') {
-          resolve({
-            token: 'mock-token-' + Date.now(),
-            userInfo: {
-              id: 1,
-              username: 'admin',
-              name: '张三',
-              role: '客户经理',
-              dept: '市公司 / 政企客户部 / 第一网格',
-              empId: 'FZ10086'
-            }
-          });
-        } else {
-          reject(new Error('账号或密码错误'));
+    return request({
+      url: buildAuthUrl(config.authServer.loginPath),
+      method: 'POST',
+      data: { username, password },
+      header: { 'Content-Type': 'application/json' },
+      needAuth: false
+    }).then((res) => {
+      if (res.data && res.data.status === 'success') {
+        const data = res.data.data || {};
+        if (data.refresh) {
+          uni.setStorageSync('refreshToken', data.refresh);
         }
-      }, 500);
+        return {
+          token: data.token,
+          userInfo: data.userInfo
+        };
+      }
+      throw new Error((res.data && res.data.message) || '登录失败');
     });
   },
 
   logout() {
-    return new Promise((resolve) => {
-      // TODO: 调用后端登出接口
-      // uni.request({
-      //   url: config.authServer.baseUrl + '/api/auth/logout',
-      //   method: 'POST',
-      //   success: () => resolve(),
-      //   fail: () => resolve()
-      // });
-      setTimeout(() => {
-        resolve();
-      }, 200);
+    const token = uni.getStorageSync('token');
+    const promise = token
+      ? request({
+          url: buildAuthUrl(config.authServer.logoutPath),
+          method: 'POST',
+          header: { 'Content-Type': 'application/json' },
+          skipAuthRedirect: true
+        }).catch(() => {})
+      : Promise.resolve();
+
+    return promise.finally(() => {
+      clearAuthStorage();
+    });
+  },
+
+  getCurrentUser() {
+    return request({
+      url: buildAuthUrl(config.authServer.mePath),
+      method: 'GET'
+    }).then((res) => {
+      if (res.data && res.data.status === 'success') {
+        return res.data.data.userInfo;
+      }
+      throw new Error((res.data && res.data.message) || '获取用户信息失败');
+    });
+  },
+
+  refreshToken() {
+    const refresh = uni.getStorageSync('refreshToken');
+    if (!refresh) {
+      return Promise.reject(new Error('无 refresh token'));
+    }
+
+    return request({
+      url: buildAuthUrl(config.authServer.refreshPath),
+      method: 'POST',
+      data: { refresh },
+      header: { 'Content-Type': 'application/json' },
+      needAuth: false,
+      skipAuthRedirect: true
+    }).then((res) => {
+      if (res.data && res.data.status === 'success') {
+        const token = res.data.data.token;
+        uni.setStorageSync('token', token);
+        return token;
+      }
+      throw new Error((res.data && res.data.message) || '刷新 token 失败');
     });
   }
 };

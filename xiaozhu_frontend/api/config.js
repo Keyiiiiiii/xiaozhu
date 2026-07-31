@@ -2,12 +2,10 @@ const config = {
   voiceServer: {
     baseUrl: "http://36.134.70.149:9005",
     wsPath: "/api/voice/auth/",
-    //TODO：从后端获取 API Token
     apiToken: "OYECtTTccG1fOzsT6e8EKXR4sOBHJalv"
   },
   fileServer: {
-    baseUrl: "http://localhost:8001",
-    // baseUrl: "http://192.168.207.152:8001",
+    baseUrl: "http://localhost:8000",
     uploadPath: "/api/file/upload/",
     speechToTextPath: "/api/file/speech-to-text/",
     summarizePath: "/api/file/summarize/",
@@ -16,15 +14,15 @@ const config = {
     getAudioFilePath: "/api/file/get-audio-file/",
     updateOriginalTextPath: "/api/file/update-original-text/",
     deleteRecordPath: "/api/file/delete-record/",
-    wsBaseUrl: "ws://localhost:8001",
-    // wsBaseUrl: "ws://192.168.207.152:8001",
+    wsBaseUrl: "ws://localhost:8000",
     wsPath: "/ws/asr/"
   },
-  // TODO: 后端登录认证服务配置
   authServer: {
-    baseUrl: "http://localhost:8001",
+    baseUrl: "http://localhost:8000",
     loginPath: "/api/auth/login/",
-    logoutPath: "/api/auth/logout/"
+    logoutPath: "/api/auth/logout/",
+    mePath: "/api/auth/me/",
+    refreshPath: "/api/auth/refresh/"
   }
 };
 

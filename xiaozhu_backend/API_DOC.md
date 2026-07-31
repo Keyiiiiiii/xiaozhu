@@ -1,9 +1,84 @@
 # 榕小助后端 API 接口文档
 
-语音转文字后端，本地mysql需要在api_user表里先手动插入一条数据，设置id为1，其余随便
+## 首次环境（零数据必做）
+
+```bash
+cd xiaozhu_backend
+pip install -r ../requirements.txt
+python manage.py makemigrations api
+python manage.py migrate
+python manage.py seed_test_users   # 写入测试账号，可重复执行
+daphne xiaozhu_backend.asgi:application -b 0.0.0.0 -p 8000
+```
+
+**测试账号**（`seed_test_users` 写入）：
+
+
+| 工号        | 密码       | 说明     |
+| --------- | -------- | ------ |
+| `admin`   | `123456` | 默认联调账号 |
+| `FZ10086` | `123456` | 第二测试用户 |
+
+
+业务接口（`/api/file/*`）需在请求头携带 JWT：`Authorization: Bearer <access_token>`。用户身份由 token 解析，**无需**再传 `creator_id`。
+
+---
+
+## 认证接口（`/api/auth`）
+
+### 1. 登录
+
+- **URL**: `POST /api/auth/login/`
+- **Body (JSON)**: `{"username": "admin", "password": "123456"}`（`username` 支持工号或用户名）
+
+**成功响应**:
+
+```json
+{
+  "status": "success",
+  "message": "登录成功",
+  "data": {
+    "token": "<access_jwt>",
+    "refresh": "<refresh_jwt>",
+    "userInfo": {
+      "id": 2,
+      "username": "admin",
+      "name": "张三",
+      "role": "客户经理",
+      "dept": "市公司 / 政企客户部 / 第一网格",
+      "empId": "admin"
+    }
+  }
+}
+```
+
+
+
+### 2. 当前用户（认证 / 验 token）
+
+- **URL**: `GET /api/auth/me/`
+- **Header**: `Authorization: Bearer <access_token>`
+
+
+
+### 3. 刷新 Token
+
+- **URL**: `POST /api/auth/refresh/`
+- **Body (JSON)**: `{"refresh": "<refresh_jwt>"}`
+
+
+
+### 4. 登出
+
+- **URL**: `POST /api/auth/logout/`
+- MVP 以前端清除本地 token 为主；接口返回成功即可。
+
+---
+
 
 
 ### 配置路径 xiaozhu/xiaozhu_backend/xiaozhu_backend/settings.py
+
 ```bash
 # mac 启动流程：
 # 0、安装minio，建立bucket "xiaozhu"
@@ -17,39 +92,50 @@ brew install redis
 source .venv/bin/activate
 cd /xiaozhu/xiaozhu_backend
 daphne xiaozhu_backend.asgi:application -b 0.0.0.0 -p 8000
-# 4、请求后端接口：
+# 4、先登录获取 token，再请求业务接口（需 Header: Authorization: Bearer <token>）：
+TOKEN=$(curl -s -X POST http://localhost:8000/api/auth/login/ \
+  -H "Content-Type: application/json" \
+  -d '{"username":"admin","password":"123456"}' | python -c "import sys,json; print(json.load(sys.stdin)['data']['token'])")
+
 curl -X POST http://localhost:8000/api/file/upload/ \
+  -H "Authorization: Bearer $TOKEN" \
   -F "file=@test.m4a" \
-  -F "creator_id=1" \      
-  -F "customer_name=张三" \   
+  -F "customer_name=张三" \
   -F "visit_time=2026-07-17" \
   -F "status=1" \
   -F "duration_seconds=10"
 
-curl -X POST http://localhost:8000/api/file/speech-to-text/ -d "creator_id=1" -d "id=1"
+curl -X POST http://localhost:8000/api/file/speech-to-text/ \
+  -H "Authorization: Bearer $TOKEN" -d "id=1"
 
-curl -X POST http://localhost:8000/api/file/summarize/ -d "creator_id=1" -d "id=1"
+curl -X POST http://localhost:8000/api/file/summarize/ \
+  -H "Authorization: Bearer $TOKEN" -d "id=1"
 
-curl -X POST http://localhost:8000/api/file/record-ids/ -d "creator_id=1"
+curl -X POST http://localhost:8000/api/file/record-ids/ \
+  -H "Authorization: Bearer $TOKEN"
 
 curl -X POST http://localhost:8000/api/file/record-detail/ \
-  -d "creator_id=1" \
+  -H "Authorization: Bearer $TOKEN" \
   -d "id=1"
 
 curl -X POST http://localhost:8000/api/file/update-original-text/ \
-  -d "creator_id=1" \
+  -H "Authorization: Bearer $TOKEN" \
   -d "id=10" \
   -d "original_text=新的转写文本内容..." \
   -d "visit_time=2026-04-01" \
   -d "customer_name=test张"
 
-curl -X POST http://localhost:8000/api/file/delete-record/ -d "creator_id=1" -d "id=1"
+curl -X POST http://localhost:8000/api/file/delete-record/ \
+  -H "Authorization: Bearer $TOKEN" -d "id=1"
 
-curl -X POST http://localhost:8000/api/file/get-audio-file/ -d "creator_id=1" -d "id=1"
+curl -X POST http://localhost:8000/api/file/get-audio-file/ \
+  -H "Authorization: Bearer $TOKEN" -d "id=1"
 
 # 5、WebSocket连接获取转写结果：
 ws://localhost:8000/ws/asr/{job_id}/
 ```
+
+
 
 ## 基础信息
 
@@ -58,9 +144,21 @@ ws://localhost:8000/ws/asr/{job_id}/
 - **Content-Type**: `multipart/form-data` 或 `application/x-www-form-urlencoded`
 - **WebSocket 前缀**: `ws://localhost:8000/ws/asr`
 
+
+
+### 业务接口鉴权
+
+- **Header**: `Authorization: Bearer <access_token>`（先调用 `POST /api/auth/login/` 获取 token）
+- 用户身份由 JWT 解析，**不要**在请求体中传 `creator_id`
+- 未带或无效 token → `401`，`message`: `未登录或 token 无效`
+
 ---
 
+
+
 ## 1. 文件上传接口
+
+
 
 ### 接口描述
 
@@ -71,25 +169,35 @@ ws://localhost:8000/ws/asr/{job_id}/
 - **URL**: `POST /api/file/upload/`
 - **Method**: `POST`
 
+
+
 ### 请求参数
 
-| 参数名 | 类型 | 必填 | 默认值 | 说明 |
-| :--- | :--- | :--- | :--- | :--- |
-| `file` | File | 是 | - | 音频文件，支持字段名：`file`、`files`、`file[]`、`files[]` |
-| `creator_id` | Integer | 否 | `1` | 创建人ID，需对应 `api_user` 表中存在的用户 |
-| `customer_name` | String | 否 | `"cus"` | 走访对象名称 |
-| `visit_time` | String | 否 | `"2026-07-01"` | 走访时间，格式：`YYYY-MM-DD` |
-| `status` | Integer | 否 | `1` | 状态值，映射关系见下表 |
-| `duration_seconds` | Integer | 否 | `0` | 音频时长，单位：秒 |
+
+| 参数名                | 类型      | 必填  | 默认值            | 说明                                           |
+| ------------------ | ------- | --- | -------------- | -------------------------------------------- |
+| `Authorization`    | Header  | 是   | -              | `Bearer <access_token>`                      |
+| `file`             | File    | 是   | -              | 音频文件，支持字段名：`file`、`files`、`file[]`、`files[]` |
+| `customer_name`    | String  | 否   | `"cus"`        | 走访对象名称                                       |
+| `visit_time`       | String  | 否   | `"2026-07-01"` | 走访时间，格式：`YYYY-MM-DD`                         |
+| `status`           | Integer | 否   | `1`            | 状态值，映射关系见下表                                  |
+| `duration_seconds` | Integer | 否   | `0`            | 音频时长，单位：秒                                    |
+
+
+
 
 ### 状态值映射
 
-| 数字值 | 字符串值 | 说明 |
-| :--- | :--- | :--- |
-| `1` | `pending` | 等待处理 |
-| `2` | `processing` | 处理中 |
-| `3` | `success` | 处理成功 |
-| `4` | `failed` | 处理失败 |
+
+| 数字值 | 字符串值         | 说明   |
+| --- | ------------ | ---- |
+| `1` | `pending`    | 等待处理 |
+| `2` | `processing` | 处理中  |
+| `3` | `success`    | 处理成功 |
+| `4` | `failed`     | 处理失败 |
+
+
+
 
 ### 支持的文件格式
 
@@ -98,6 +206,8 @@ ws://localhost:8000/ws/asr/{job_id}/
 - `.wav`
 - `.ogg`
 - `.flac`
+
+
 
 ### 成功响应
 
@@ -113,6 +223,8 @@ ws://localhost:8000/ws/asr/{job_id}/
 }
 ```
 
+
+
 ### 失败响应
 
 **Status Code**: `400 Bad Request`
@@ -127,7 +239,7 @@ ws://localhost:8000/ws/asr/{job_id}/
 ```json
 {
     "status": "error",
-    "message": "用户ID 1 不存在"
+    "message": "未登录或 token 无效"
 }
 ```
 
@@ -140,48 +252,64 @@ ws://localhost:8000/ws/asr/{job_id}/
 }
 ```
 
+
+
 ### 示例请求
 
 ```bash
 curl -X POST http://localhost:8000/api/file/upload/ \
+  -H "Authorization: Bearer $TOKEN" \
   -F "file=@test.m4a" \
-  -F "creator_id=1" \
   -F "customer_name=张三" \
   -F "visit_time=2026-07-17" \
   -F "status=1"
 ```
 
+
+
 ### 数据库记录
 
 上传成功后，会在 `api_visitrecord` 表中创建一条记录：
 
-| 字段 | 说明 |
-| :--- | :--- |
-| `creator_id` | 创建人ID，关联 `api_user` 表 |
-| `customer_name` | 走访对象名称 |
-| `audio_url` | MinIO 文件访问 URL |
-| `visit_time` | 走访时间 |
-| `status` | 处理状态 |
+
+| 字段              | 说明                    |
+| --------------- | --------------------- |
+| `creator_id`    | 创建人ID，关联 `api_user` 表 |
+| `customer_name` | 走访对象名称                |
+| `audio_url`     | MinIO 文件访问 URL        |
+| `visit_time`    | 走访时间                  |
+| `status`        | 处理状态                  |
+
 
 ---
 
+
+
 ## 2. 语音转文字接口（异步模式）
+
+
 
 ### 接口描述
 
-根据 `creator_id` 和 `id` 从数据库 `api_visitrecord` 表中获取对应的音频文件 URL，调用外部语音转文字 API 进行转写。**接口为异步模式**，提交任务后立即返回 `job_id`，转写结果通过 WebSocket 推送。
+根据登录用户与记录 `id` 从数据库 `api_visitrecord` 表中获取对应的音频文件 URL，调用外部语音转文字 API 进行转写。**接口为异步模式**，提交任务后立即返回 `job_id`，转写结果通过 WebSocket 推送。
 
 ### 请求信息
 
 - **URL**: `POST /api/file/speech-to-text/`
 - **Method**: `POST`
 
+
+
 ### 请求参数
 
-| 参数名 | 类型 | 必填 | 默认值 | 说明 |
-| :--- | :--- | :--- | :--- | :--- |
-| `creator_id` | Integer | 否 | `1` | 创建人ID，需对应 `api_user` 表中存在的用户 |
-| `id` | Integer | 否 | `1` | 走访记录ID，需对应 `api_visitrecord` 表中存在的记录 |
+
+| 参数名             | 类型      | 必填  | 默认值 | 说明                      |
+| --------------- | ------- | --- | --- | ----------------------- |
+| `Authorization` | Header  | 是   | -   | `Bearer <access_token>` |
+| `id`            | Integer | 是   | -   | 走访记录ID，需属于当前登录用户        |
+
+
+
 
 ### 成功响应
 
@@ -196,6 +324,8 @@ curl -X POST http://localhost:8000/api/file/upload/ \
 }
 ```
 
+
+
 ### 失败响应
 
 **Status Code**: `400 Bad Request`
@@ -203,7 +333,7 @@ curl -X POST http://localhost:8000/api/file/upload/ \
 ```json
 {
     "status": "error",
-    "message": "走访记录 ID=1, creator_id=1 不存在"
+    "message": "走访记录 ID=1 不存在"
 }
 ```
 
@@ -230,26 +360,36 @@ curl -X POST http://localhost:8000/api/file/upload/ \
 }
 ```
 
+
+
 ### 示例请求
 
 ```bash
 curl -X POST http://localhost:8000/api/file/speech-to-text/ \
-  -d "creator_id=1" \
+  -H "Authorization: Bearer $TOKEN" \
   -d "id=1"
 ```
+
+
 
 ### 数据库更新
 
 转写过程中及完成后，会更新 `api_visitrecord` 表中对应记录：
 
-| 字段 | 更新逻辑 |
-| :--- | :--- |
-| `status` | `pending` → `processing`（提交任务时）→ `success` / `failed`（完成时） |
-| `original_text` | 转写成功后存入语音转写结果（`segments` 字段内容） |
+
+| 字段              | 更新逻辑                                                       |
+| --------------- | ---------------------------------------------------------- |
+| `status`        | `pending` → `processing`（提交任务时）→ `success` / `failed`（完成时） |
+| `original_text` | 转写成功后存入语音转写结果（`segments` 字段内容）                             |
+
 
 ---
 
+
+
 ## 3. WebSocket 转写结果推送接口
+
+
 
 ### 接口描述
 
@@ -260,12 +400,16 @@ curl -X POST http://localhost:8000/api/file/speech-to-text/ \
 - **URL**: `ws://localhost:8000/ws/asr/{job_id}/`
 - **Protocol**: `WebSocket`
 
+
+
 ### 连接流程
 
 1. 调用 `POST /api/file/speech-to-text/` 获取 `job_id`
 2. 使用 `job_id` 建立 WebSocket 连接
 3. 等待服务端推送转写结果
 4. 结果推送完成后，服务端主动关闭连接
+
+
 
 ### 推送消息格式
 
@@ -315,6 +459,8 @@ curl -X POST http://localhost:8000/api/file/speech-to-text/ \
 }
 ```
 
+
+
 ### 示例代码
 
 **JavaScript**:
@@ -324,9 +470,10 @@ curl -X POST http://localhost:8000/api/file/speech-to-text/ \
 const response = await fetch('/api/file/speech-to-text/', {
     method: 'POST',
     headers: {
-        'Content-Type': 'application/x-www-form-urlencoded'
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'Authorization': `Bearer ${token}`
     },
-    body: 'creator_id=1&id=1'
+    body: 'id=1'
 });
 const result = await response.json();
 const jobId = result.job_id;
@@ -375,23 +522,33 @@ asyncio.run(get_asr_result('your_job_id_here'))
 
 ---
 
+
+
 ## 4. 录音内容总结接口
+
+
 
 ### 接口描述
 
-根据 `record_id`（id）和 `creator_id` 从数据库 `api_visitrecord` 表中获取 `original_text` 字段内容，调用 AI 总结接口进行总结，并将总结结果存入 `ai_summary` 字段。
+根据 `record_id`（id）从数据库 `api_visitrecord` 表中获取 `original_text` 字段内容，调用 AI 总结接口进行总结，并将总结结果存入 `ai_summary` 字段。
 
 ### 请求信息
 
 - **URL**: `POST /api/file/summarize/`
 - **Method**: `POST`
 
+
+
 ### 请求参数
 
-| 参数名 | 类型 | 必填 | 默认值 | 说明 |
-| :--- | :--- | :--- | :--- | :--- |
-| `creator_id` | Integer | 是 | - | 创建人ID，需对应 `api_user` 表中存在的用户 |
-| `id` | Integer | 是 | - | 走访记录ID，需对应 `api_visitrecord` 表中存在的记录 |
+
+| 参数名             | 类型      | 必填  | 默认值 | 说明                      |
+| --------------- | ------- | --- | --- | ----------------------- |
+| `Authorization` | Header  | 是   | -   | `Bearer <access_token>` |
+| `id`            | Integer | 是   | -   | 走访记录ID，需属于当前登录用户        |
+
+
+
 
 ### 成功响应
 
@@ -406,6 +563,8 @@ asyncio.run(get_asr_result('your_job_id_here'))
 }
 ```
 
+
+
 ### 失败响应
 
 **Status Code**: `400 Bad Request`
@@ -413,14 +572,14 @@ asyncio.run(get_asr_result('your_job_id_here'))
 ```json
 {
     "status": "error",
-    "message": "id 和 creator_id 不能为空"
+    "message": "id 不能为空"
 }
 ```
 
 ```json
 {
     "status": "error",
-    "message": "走访记录 ID=1, creator_id=1 不存在"
+    "message": "走访记录 ID=1 不存在"
 }
 ```
 
@@ -447,40 +606,56 @@ asyncio.run(get_asr_result('your_job_id_here'))
 }
 ```
 
+
+
 ### 示例请求
 
 ```bash
 curl -X POST http://localhost:8000/api/file/summarize/ \
-  -d "creator_id=1" \
+  -H "Authorization: Bearer $TOKEN" \
   -d "id=1"
 ```
+
+
 
 ### 数据库更新
 
 总结成功后，会更新 `api_visitrecord` 表中对应记录：
 
-| 字段 | 更新逻辑 |
-| :--- | :--- |
+
+| 字段           | 更新逻辑       |
+| ------------ | ---------- |
 | `ai_summary` | 存入 AI 总结结果 |
+
 
 ---
 
+
+
 ## 5. 获取记录ID列表接口
+
+
 
 ### 接口描述
 
-根据 `creator_id` 从数据库 `api_visitrecord` 表中获取该用户下所有走访记录的 ID 列表。
+根据登录用户从数据库 `api_visitrecord` 表中获取该用户下所有走访记录的 ID 列表。
 
 ### 请求信息
 
 - **URL**: `POST /api/file/record-ids/`
 - **Method**: `POST`
 
+
+
 ### 请求参数
 
-| 参数名 | 类型 | 必填 | 默认值 | 说明 |
-| :--- | :--- | :--- | :--- | :--- |
-| `creator_id` | Integer | 是 | - | 创建人ID，需对应 `api_user` 表中存在的用户 |
+
+| 参数名             | 类型     | 必填  | 默认值 | 说明                      |
+| --------------- | ------ | --- | --- | ----------------------- |
+| `Authorization` | Header | 是   | -   | `Bearer <access_token>` |
+
+
+
 
 ### 成功响应
 
@@ -499,13 +674,17 @@ curl -X POST http://localhost:8000/api/file/summarize/ \
 
 响应数据结构说明：
 
-| 索引 | 字段名 | 类型 | 说明 |
-| :--- | :--- | :--- | :--- |
-| 0 | id | Integer | 走访记录ID |
-| 1 | status | String | 处理状态 |
-| 2 | customer_name | String | 走访对象名称 |
-| 3 | duration_seconds | Integer/null | 音频时长（秒） |
-| 4 | visit_time | String/null | 走访时间（ISO格式） |
+
+| 索引  | 字段名              | 类型           | 说明          |
+| --- | ---------------- | ------------ | ----------- |
+| 0   | id               | Integer      | 走访记录ID      |
+| 1   | status           | String       | 处理状态        |
+| 2   | customer_name    | String       | 走访对象名称      |
+| 3   | duration_seconds | Integer/null | 音频时长（秒）     |
+| 4   | visit_time       | String/null  | 走访时间（ISO格式） |
+
+
+
 
 ### 失败响应
 
@@ -514,36 +693,48 @@ curl -X POST http://localhost:8000/api/file/summarize/ \
 ```json
 {
     "status": "error",
-    "message": "creator_id 不能为空"
+    "message": "未登录或 token 无效"
 }
 ```
+
+
 
 ### 示例请求
 
 ```bash
 curl -X POST http://localhost:8000/api/file/record-ids/ \
-  -d "creator_id=1"
+  -H "Authorization: Bearer $TOKEN"
 ```
 
 ---
 
+
+
 ## 6. 获取记录详情接口
+
+
 
 ### 接口描述
 
-根据 `creator_id` 和 `id` 从数据库 `api_visitrecord` 表中获取完整的走访记录信息。
+根据登录用户与记录 `id` 从数据库 `api_visitrecord` 表中获取完整的走访记录信息。
 
 ### 请求信息
 
 - **URL**: `POST /api/file/record-detail/`
 - **Method**: `POST`
 
+
+
 ### 请求参数
 
-| 参数名 | 类型 | 必填 | 默认值 | 说明 |
-| :--- | :--- | :--- | :--- | :--- |
-| `creator_id` | Integer | 是 | - | 创建人ID，需对应 `api_user` 表中存在的用户 |
-| `id` | Integer | 是 | - | 走访记录ID，需对应 `api_visitrecord` 表中存在的记录 |
+
+| 参数名             | 类型      | 必填  | 默认值 | 说明                      |
+| --------------- | ------- | --- | --- | ----------------------- |
+| `Authorization` | Header  | 是   | -   | `Bearer <access_token>` |
+| `id`            | Integer | 是   | -   | 走访记录ID，需属于当前登录用户        |
+
+
+
 
 ### 成功响应
 
@@ -568,6 +759,8 @@ curl -X POST http://localhost:8000/api/file/record-ids/ \
 }
 ```
 
+
+
 ### 失败响应
 
 **Status Code**: `400 Bad Request`
@@ -575,47 +768,59 @@ curl -X POST http://localhost:8000/api/file/record-ids/ \
 ```json
 {
     "status": "error",
-    "message": "creator_id 和 id 不能为空"
+    "message": "id 不能为空"
 }
 ```
 
 ```json
 {
     "status": "error",
-    "message": "走访记录 ID=1, creator_id=1 不存在"
+    "message": "走访记录 ID=1 不存在"
 }
 ```
+
+
 
 ### 示例请求
 
 ```bash
 curl -X POST http://localhost:8000/api/file/record-detail/ \
-  -d "creator_id=1" \
+  -H "Authorization: Bearer $TOKEN" \
   -d "id=1"
 ```
 
 ---
 
+
+
 ## 7. 更新录音文本接口
+
+
 
 ### 接口描述
 
-根据 `creator_id` 和 `id` 更新数据库 `api_visitrecord` 表中对应记录的 `original_text`、`customer_name` 和 `visit_time` 字段。支持按需更新，至少传入一个可更新字段。
+根据登录用户与记录 `id` 更新数据库 `api_visitrecord` 表中对应记录的 `original_text`、`customer_name` 和 `visit_time` 字段。支持按需更新，至少传入一个可更新字段。
 
 ### 请求信息
 
 - **URL**: `POST /api/file/update-original-text/`
 - **Method**: `POST`
 
+
+
 ### 请求参数
 
-| 参数名 | 类型 | 必填 | 默认值 | 说明 |
-| :--- | :--- | :--- | :--- | :--- |
-| `creator_id` | Integer | 是 | - | 创建人ID，需对应 `api_user` 表中存在的用户 |
-| `id` | Integer | 是 | - | 走访记录ID，需对应 `api_visitrecord` 表中存在的记录 |
-| `original_text` | String | 否 | - | 更新后的录音转写文本内容 |
-| `customer_name` | String | 否 | - | 更新后的走访对象名称 |
-| `visit_time` | String | 否 | - | 更新后的走访时间，格式：`YYYY-MM-DD` |
+
+| 参数名             | 类型      | 必填  | 默认值 | 说明                       |
+| --------------- | ------- | --- | --- | ------------------------ |
+| `Authorization` | Header  | 是   | -   | `Bearer <access_token>`  |
+| `id`            | Integer | 是   | -   | 走访记录ID，需属于当前登录用户         |
+| `original_text` | String  | 否   | -   | 更新后的录音转写文本内容             |
+| `customer_name` | String  | 否   | -   | 更新后的走访对象名称               |
+| `visit_time`    | String  | 否   | -   | 更新后的走访时间，格式：`YYYY-MM-DD` |
+
+
+
 
 ### 成功响应
 
@@ -629,6 +834,8 @@ curl -X POST http://localhost:8000/api/file/record-detail/ \
 }
 ```
 
+
+
 ### 失败响应
 
 **Status Code**: `400 Bad Request`
@@ -636,7 +843,7 @@ curl -X POST http://localhost:8000/api/file/record-detail/ \
 ```json
 {
     "status": "error",
-    "message": "creator_id 和 id 不能为空"
+    "message": "id 不能为空"
 }
 ```
 
@@ -657,9 +864,11 @@ curl -X POST http://localhost:8000/api/file/record-detail/ \
 ```json
 {
     "status": "error",
-    "message": "走访记录 ID=1, creator_id=1 不存在"
+    "message": "走访记录 ID=1 不存在"
 }
 ```
+
+
 
 ### 示例请求
 
@@ -667,7 +876,7 @@ curl -X POST http://localhost:8000/api/file/record-detail/ \
 
 ```bash
 curl -X POST http://localhost:8000/api/file/update-original-text/ \
-  -d "creator_id=1" \
+  -H "Authorization: Bearer $TOKEN" \
   -d "id=1" \
   -d "original_text=新的转写文本内容..."
 ```
@@ -676,41 +885,55 @@ curl -X POST http://localhost:8000/api/file/update-original-text/ \
 
 ```bash
 curl -X POST http://localhost:8000/api/file/update-original-text/ \
-  -d "creator_id=1" \
+  -H "Authorization: Bearer $TOKEN" \
   -d "id=1" \
   -d "customer_name=新客户" \
   -d "visit_time=2026-08-01"
 ```
 
+
+
 ### 数据库更新
 
 更新成功后，会更新 `api_visitrecord` 表中对应记录：
 
-| 字段 | 更新逻辑 |
-| :--- | :--- |
+
+| 字段              | 更新逻辑                  |
+| --------------- | --------------------- |
 | `original_text` | 更新为传入的录音转写文本内容（仅当传入时） |
-| `customer_name` | 更新为传入的走访对象名称（仅当传入时） |
-| `visit_time` | 更新为传入的走访时间（仅当传入时） |
+| `customer_name` | 更新为传入的走访对象名称（仅当传入时）   |
+| `visit_time`    | 更新为传入的走访时间（仅当传入时）     |
+
 
 ---
 
+
+
 ## 8. 删除记录接口
+
+
 
 ### 接口描述
 
-根据 `creator_id` 和 `id` 删除数据库 `api_visitrecord` 表中对应记录。
+根据登录用户与记录 `id` 删除数据库 `api_visitrecord` 表中对应记录。
 
 ### 请求信息
 
 - **URL**: `POST /api/file/delete-record/`
 - **Method**: `POST`
 
+
+
 ### 请求参数
 
-| 参数名 | 类型 | 必填 | 默认值 | 说明 |
-| :--- | :--- | :--- | :--- | :--- |
-| `creator_id` | Integer | 是 | - | 创建人ID，需对应 `api_user` 表中存在的用户 |
-| `id` | Integer | 是 | - | 走访记录ID，需对应 `api_visitrecord` 表中存在的记录 |
+
+| 参数名             | 类型      | 必填  | 默认值 | 说明                      |
+| --------------- | ------- | --- | --- | ----------------------- |
+| `Authorization` | Header  | 是   | -   | `Bearer <access_token>` |
+| `id`            | Integer | 是   | -   | 走访记录ID，需属于当前登录用户        |
+
+
+
 
 ### 成功响应
 
@@ -724,6 +947,8 @@ curl -X POST http://localhost:8000/api/file/update-original-text/ \
 }
 ```
 
+
+
 ### 失败响应
 
 **Status Code**: `400 Bad Request`
@@ -731,44 +956,56 @@ curl -X POST http://localhost:8000/api/file/update-original-text/ \
 ```json
 {
     "status": "error",
-    "message": "creator_id 和 id 不能为空"
+    "message": "id 不能为空"
 }
 ```
 
 ```json
 {
     "status": "error",
-    "message": "走访记录 ID=1, creator_id=1 不存在"
+    "message": "走访记录 ID=1 不存在"
 }
 ```
+
+
 
 ### 示例请求
 
 ```bash
 curl -X POST http://localhost:8000/api/file/delete-record/ \
-  -d "creator_id=1" \
+  -H "Authorization: Bearer $TOKEN" \
   -d "id=1"
 ```
 
 ---
 
+
+
 ## 9. 获取音频文件接口
+
+
 
 ### 接口描述
 
-根据 `creator_id` 和 `id` 从数据库 `api_visitrecord` 表中获取对应的音频文件 URL，从 MinIO 存储中读取音频文件并返回给前端，支持直接播放。
+根据登录用户与记录 `id` 从数据库 `api_visitrecord` 表中获取对应的音频文件 URL，从 MinIO 存储中读取音频文件并返回给前端，支持直接播放。
 
 ### 请求信息
 
 - **URL**: `POST /api/file/get-audio-file/`
 - **Method**: `POST`
 
+
+
 ### 请求参数
 
-| 参数名 | 类型 | 必填 | 默认值 | 说明 |
-| :--- | :--- | :--- | :--- | :--- |
-| `creator_id` | Integer | 是 | - | 创建人ID，需对应 `api_user` 表中存在的用户 |
-| `id` | Integer | 是 | - | 走访记录ID，需对应 `api_visitrecord` 表中存在的记录 |
+
+| 参数名             | 类型      | 必填  | 默认值 | 说明                      |
+| --------------- | ------- | --- | --- | ----------------------- |
+| `Authorization` | Header  | 是   | -   | `Bearer <access_token>` |
+| `id`            | Integer | 是   | -   | 走访记录ID，需属于当前登录用户        |
+
+
+
 
 ### 成功响应
 
@@ -776,10 +1013,14 @@ curl -X POST http://localhost:8000/api/file/delete-record/ \
 
 成功时直接返回音频文件二进制流，浏览器可直接播放。响应头包含：
 
-| 响应头 | 说明 |
-| :--- | :--- |
-| `Content-Type` | 根据文件扩展名自动识别，支持 `audio/m4a`、`audio/mpeg`、`audio/wav`、`audio/ogg`、`audio/flac` |
-| `Content-Disposition` | `inline; filename={文件名}`，表示内联播放 |
+
+| 响应头                   | 说明                                                                           |
+| --------------------- | ---------------------------------------------------------------------------- |
+| `Content-Type`        | 根据文件扩展名自动识别，支持 `audio/m4a`、`audio/mpeg`、`audio/wav`、`audio/ogg`、`audio/flac` |
+| `Content-Disposition` | `inline; filename={文件名}`，表示内联播放                                              |
+
+
+
 
 ### 失败响应
 
@@ -788,14 +1029,14 @@ curl -X POST http://localhost:8000/api/file/delete-record/ \
 ```json
 {
     "status": "error",
-    "message": "creator_id 和 id 不能为空"
+    "message": "id 不能为空"
 }
 ```
 
 ```json
 {
     "status": "error",
-    "message": "走访记录 ID=1, creator_id=1 不存在"
+    "message": "走访记录 ID=1 不存在"
 }
 ```
 
@@ -815,14 +1056,18 @@ curl -X POST http://localhost:8000/api/file/delete-record/ \
 }
 ```
 
+
+
 ### 示例请求
 
 ```bash
 curl -X POST http://localhost:8000/api/file/get-audio-file/ \
-  -d "creator_id=1" \
+  -H "Authorization: Bearer $TOKEN" \
   -d "id=1" \
   -o audio.m4a
 ```
+
+
 
 ### 前端使用示例
 
@@ -834,9 +1079,10 @@ async function playAudio(recordId, creatorId) {
     const response = await fetch('/api/file/get-audio-file/', {
         method: 'POST',
         headers: {
-            'Content-Type': 'application/x-www-form-urlencoded'
+            'Content-Type': 'application/x-www-form-urlencoded',
+            'Authorization': `Bearer ${token}`
         },
-        body: `creator_id=${creatorId}&id=${recordId}`
+        body: `id=${recordId}`
     });
 
     if (!response.ok) {
@@ -859,13 +1105,15 @@ async function playAudio(recordId, creatorId) {
 
 ---
 
+
+
 ## 接口调用流程
 
 ```
 客户端上传文件 → 创建走访记录 → 调用语音转文字接口 → 建立WebSocket → 接收转写结果 → 调用总结接口
     ↓                    ↓                      ↓                ↓                    ↓
 POST /upload/         DB记录               POST /speech-to-text/   ws://localhost:8000/ws/asr/{job_id}/   POST /summarize/
-    ↓              (creator_id,              (creator_id, id)         ↓                    (creator_id, id)
+    ↓              (JWT用户)                 (id)                     ↓                    (id)
  上传到MinIO        id, audio_url)              ↓                  等待推送                  ↓
     ↓                                          ↓                    ↓                    查询DB获取original_text
  创建VisitRecord                           查询DB获取audio_url   转写结果                    ↓
@@ -885,52 +1133,62 @@ POST /upload/         DB记录               POST /speech-to-text/   ws://localh
 
 ---
 
+
+
 ## 错误码说明
 
-| HTTP 状态码 | 说明 |
-| :--- | :--- |
-| `400` | 请求参数错误（文件不存在、file_url为空等） |
-| `500` | 服务器内部错误（MinIO操作失败、API调用失败等） |
+
+| HTTP 状态码 | 说明                          |
+| -------- | --------------------------- |
+| `400`    | 请求参数错误（文件不存在、file_url为空等）   |
+| `500`    | 服务器内部错误（MinIO操作失败、API调用失败等） |
+
 
 ---
 
+
+
 ## 测试指南
+
+
 
 ### 环境准备
 
 1. **启动 MinIO**:
-   ```bash
+  ```bash
    minio server ~/minio-data --console-address ":9001"
-   ```
-   访问 http://localhost:9001 登录，创建 bucket "xiaozhu"
-
+  ```
+   访问 [http://localhost:9001](http://localhost:9001) 登录，创建 bucket "xiaozhu"
 2. **启动 Redis**:
-   ```bash
+  ```bash
    /opt/homebrew/opt/redis/bin/redis-server /opt/homebrew/etc/redis.conf --daemonize yes
-   ```
+  ```
    验证: `/opt/homebrew/opt/redis/bin/redis-cli ping` 应返回 `PONG`
-
 3. **启动后端服务**:
-   ```bash
+  ```bash
    cd /xiaozhu/xiaozhu_backend
    source .venv/bin/activate
    daphne xiaozhu_backend.asgi:application -b 0.0.0.0 -p 8000
-   ```
+  ```
+
+
 
 ### 测试步骤
+
+
 
 #### 步骤1: 上传音频文件
 
 ```bash
 curl -X POST http://localhost:8000/api/file/upload/ \
   -F "file=@test.m4a" \
-  -F "creator_id=1" \
   -F "customer_name=测试用户" \
   -F "visit_time=2026-07-20" \
   -F "status=1"
 ```
 
 预期响应:
+
 ```json
 {
     "status": "success",
@@ -940,15 +1198,18 @@ curl -X POST http://localhost:8000/api/file/upload/ \
 }
 ```
 
+
+
 #### 步骤2: 提交转写任务
 
 ```bash
 curl -X POST http://localhost:8000/api/file/speech-to-text/ \
-  -d "creator_id=1" \
+  -H "Authorization: Bearer $TOKEN" \
   -d "id=1"
 ```
 
 预期响应:
+
 ```json
 {
     "status": "success",
@@ -957,6 +1218,8 @@ curl -X POST http://localhost:8000/api/file/speech-to-text/ \
     "record_id": 1
 }
 ```
+
+
 
 #### 步骤3: 通过 WebSocket 获取结果
 
@@ -984,6 +1247,7 @@ if __name__ == '__main__':
 ```
 
 运行:
+
 ```bash
 pip install websockets
 python test_ws.py
@@ -1006,17 +1270,20 @@ ws.onmessage = e => console.log(JSON.parse(e.data));
 ws.onclose = () => console.log('连接关闭');
 ```
 
+
+
 #### 步骤4: 调用总结接口
 
 转写完成后，调用总结接口对录音内容进行 AI 总结：
 
 ```bash
 curl -X POST http://localhost:8000/api/file/summarize/ \
-  -d "creator_id=1" \
+  -H "Authorization: Bearer $TOKEN" \
   -d "id=1"
 ```
 
 预期响应:
+
 ```json
 {
     "status": "success",
@@ -1026,16 +1293,19 @@ curl -X POST http://localhost:8000/api/file/summarize/ \
 }
 ```
 
+
+
 #### 步骤5: 获取记录ID列表
 
 获取指定用户下所有走访记录的 ID 列表：
 
 ```bash
 curl -X POST http://localhost:8000/api/file/record-ids/ \
-  -d "creator_id=1"
+  -H "Authorization: Bearer $TOKEN"
 ```
 
 预期响应:
+
 ```json
 {
     "status": "success",
@@ -1047,17 +1317,20 @@ curl -X POST http://localhost:8000/api/file/record-ids/ \
 }
 ```
 
+
+
 #### 步骤6: 获取记录详情
 
 根据记录 ID 获取完整的走访记录信息：
 
 ```bash
 curl -X POST http://localhost:8000/api/file/record-detail/ \
-  -d "creator_id=1" \
+  -H "Authorization: Bearer $TOKEN" \
   -d "id=1"
 ```
 
 预期响应:
+
 ```json
 {
     "status": "success",
@@ -1077,18 +1350,21 @@ curl -X POST http://localhost:8000/api/file/record-detail/ \
 }
 ```
 
+
+
 #### 步骤7: 更新录音文本
 
 更新指定记录的录音转写文本内容：
 
 ```bash
 curl -X POST http://localhost:8000/api/file/update-original-text/ \
-  -d "creator_id=1" \
+  -H "Authorization: Bearer $TOKEN" \
   -d "id=1" \
   -d "original_text=新的转写文本内容..."
 ```
 
 预期响应:
+
 ```json
 {
     "status": "success",
@@ -1096,6 +1372,8 @@ curl -X POST http://localhost:8000/api/file/update-original-text/ \
     "record_id": 1
 }
 ```
+
+
 
 ### 注意事项
 
@@ -1105,14 +1383,18 @@ curl -X POST http://localhost:8000/api/file/update-original-text/ \
 4. 转写完成后，服务端会主动关闭 WebSocket 连接
 5. 如果需要重新转写，需要重新调用 `POST /api/file/speech-to-text/` 获取新的 `job_id`
 
+
+
 ### 调试技巧
 
 1. **查看后端日志**: daphne 启动后会输出日志，包括 WebSocket 连接和消息推送情况
-2. **查看数据库状态**: 可以通过 Django admin（http://localhost:8000/admin/）查看 `api_visitrecord` 表的状态变化
+2. **查看数据库状态**: 可以通过 Django admin（[http://localhost:8000/admin/）查看](http://localhost:8000/admin/）查看) `api_visitrecord` 表的状态变化
 3. **测试 WebSocket 连接**: 使用以下命令测试 WebSocket 是否正常工作
-   ```bash
+  ```bash
    wscat -c ws://localhost:8000/ws/asr/test123/
-   ```
+  ```
+
+
 
 ### 完整测试示例
 
@@ -1120,7 +1402,6 @@ curl -X POST http://localhost:8000/api/file/update-original-text/ \
 # 1. 上传文件
 UPLOAD_RESPONSE=$(curl -s -X POST http://localhost:8000/api/file/upload/ \
   -F "file=@test.m4a" \
-  -F "creator_id=1" \
   -F "customer_name=测试" \
   -F "visit_time=2026-07-20")
 echo "上传结果: $UPLOAD_RESPONSE"
@@ -1131,7 +1412,7 @@ echo "record_id: $RECORD_ID"
 
 # 3. 提交转写任务
 STT_RESPONSE=$(curl -s -X POST http://localhost:8000/api/file/speech-to-text/ \
-  -d "creator_id=1" \
+  -H "Authorization: Bearer $TOKEN" \
   -d "id=$RECORD_ID")
 echo "转写任务提交结果: $STT_RESPONSE"
 
@@ -1156,3 +1437,4 @@ async def get_result():
 asyncio.run(get_result())
 "
 ```
+

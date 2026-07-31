@@ -1,13 +1,16 @@
 const baseUrl = '/api/knowledge';
 
 export function sendKnowledgeQuery(question) {
+  const userInfo = uni.getStorageSync('userInfo') || {};
+  const userId = userInfo.empId || String(userInfo.id || '');
+
   return new Promise((resolve, reject) => {
     const url = `${baseUrl}?streaming=true`;
     
     const requestData = {
       ques: question,
       'sys.files': [],
-      'sys.user_id': '',
+      'sys.user_id': userId,
       'sys.app_id': '',
       'sys.workflow_id': '',
       'sys.workflow_run_id': '',

@@ -213,7 +213,7 @@ export default {
     async loadRecordDetail() {
       try {
         if (this.serverRecordId) {
-          const serverRecord = await getRecordDetail(this.serverRecordId, 1);
+          const serverRecord = await getRecordDetail(this.serverRecordId);
           this.record = this.mapServerRecordToLocal(serverRecord);
           this.aiSummary = serverRecord.ai_summary || '';
           return;
@@ -309,7 +309,7 @@ export default {
       this.isSummarizing = true;
       this.aiSummary = '';
       try {
-        const result = await summarizeRecording(this.serverRecordId || this.record.recordId, 1);
+        const result = await summarizeRecording(this.serverRecordId || this.record.recordId);
         this.aiSummary = result.aiSummary || '';
         uni.showToast({
           title: '总结成功',
@@ -339,7 +339,7 @@ export default {
       }
       this.isReTranscribing = true;
       try {
-        await submitSpeechToText(recordId, 1);
+        await submitSpeechToText(recordId);
         uni.showToast({
           title: '转写任务已提交',
           icon: 'success'
@@ -475,7 +475,7 @@ export default {
         }
 
         if (Object.keys(updateData).length > 0) {
-          await updateOriginalText(recordId, 1, updateData);
+          await updateOriginalText(recordId, updateData);
 
           if (updateData.customer_name) {
             this.record.name = updateData.customer_name;
@@ -558,7 +558,7 @@ export default {
 
       try {
         uni.showLoading({ title: '加载音频...' });
-        const audioData = await fetchAudioData(recordId, 1);
+        const audioData = await fetchAudioData(recordId);
         
         let audioSrc = '';
         // #ifdef H5

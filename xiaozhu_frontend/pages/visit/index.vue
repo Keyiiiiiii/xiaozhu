@@ -1082,7 +1082,6 @@ export default {
             : new Date().toISOString().split('T')[0];
 
           const formData = {
-            creator_id: 1,
             customer_name: this.pendingRecord.name || "走访记录",
             visit_time: visitDate,
             status: 1,
@@ -1094,7 +1093,7 @@ export default {
           finalAudioUrl = res.file_url || audioPath;
           serverRecordId = res.record_id;
 
-          const sttResult = await submitSpeechToText(serverRecordId, 1);
+          const sttResult = await submitSpeechToText(serverRecordId);
           jobId = sttResult.job_id;
         }
 
@@ -1227,7 +1226,7 @@ export default {
         });
 
         if (item.recordId) {
-          await deleteRecord(item.recordId, 1);
+          await deleteRecord(item.recordId);
         }
 
         const index = this.historyList.findIndex(r => r.id === item.id);
@@ -1300,7 +1299,7 @@ export default {
 
     async loadHistoryFromApi() {
       try {
-        const records = await getRecordIds(1);
+        const records = await getRecordIds();
         this.historyList = records.map(r => this.mapListRecordToLocal(r)).sort((a, b) => {
           return parseInt(b.recordId) - parseInt(a.recordId);
         });

@@ -52,7 +52,7 @@
       </view>
 
       <view class="login-footer">
-        <text class="footer-text">测试账号：admin / 123456</text>
+        <text class="footer-text">测试账号：admin / 123456（需先执行 seed_test_users）</text>
       </view>
     </view>
   </view>

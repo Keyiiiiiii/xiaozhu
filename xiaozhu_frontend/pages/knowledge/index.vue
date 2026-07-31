@@ -193,13 +193,16 @@ function onSend() {
     }, 100)
   })
   
+  const userInfo = uni.getStorageSync('userInfo') || {};
+  const userId = userInfo.empId || String(userInfo.id || '');
+
   uni.request({
     url: '/api/knowledge',
     method: 'POST',
     data: {
       ques: text,
       'sys.files': [],
-      'sys.user_id': '',
+      'sys.user_id': userId,
       'sys.app_id': '',
       'sys.workflow_id': '',
       'sys.workflow_run_id': '',

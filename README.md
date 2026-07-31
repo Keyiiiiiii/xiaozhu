@@ -1,5 +1,7 @@
 # 数据库初始化
 
+**前端联调**：请先阅读 [`docs/榕小助_前端联调交接说明.md`](docs/榕小助_前端联调交接说明.md)（测试账号、config 改 IP、验收清单）。
+
 ### 1. 激活虚拟环境
 
 ```bash
@@ -46,7 +48,10 @@ DB_PORT=3306
 cd xiaozhu_backend
 python manage.py makemigrations api
 python manage.py migrate
+python manage.py seed_test_users
 ```
+
+`seed_test_users` 会写入可登录测试账号（`admin / 123456`），零数据环境联调前必须执行，可重复运行。
 
 ### 6.启动开发服务器
 

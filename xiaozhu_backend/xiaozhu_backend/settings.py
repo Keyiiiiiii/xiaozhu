@@ -11,6 +11,7 @@ https://docs.djangoproject.com/en/4.2/ref/settings/
 """
 
 import os
+from datetime import timedelta
 from pathlib import Path
 from dotenv import load_dotenv
 import pymysql
@@ -44,9 +45,10 @@ INSTALLED_APPS = [
     "django.contrib.sessions",
     "django.contrib.messages",
     "django.contrib.staticfiles",
+    "rest_framework",
     "file_upload",
     "api",
-    "knowledge"
+    "knowledge",
 ]
 
 MIDDLEWARE = [
@@ -148,6 +150,24 @@ MINIO_SECURE = False
 MINIO_BUCKET_NAME = "xiaozhu"
 
 AUTH_USER_MODEL = "api.User"
+
+AUTHENTICATION_BACKENDS = [
+    "api.backends.WorkIdAuthBackend",
+    "django.contrib.auth.backends.ModelBackend",
+]
+
+REST_FRAMEWORK = {
+    "DEFAULT_AUTHENTICATION_CLASSES": [
+        "rest_framework_simplejwt.authentication.JWTAuthentication",
+    ],
+}
+
+SIMPLE_JWT = {
+    "ACCESS_TOKEN_LIFETIME": timedelta(hours=2),
+    "REFRESH_TOKEN_LIFETIME": timedelta(days=7),
+    "ROTATE_REFRESH_TOKENS": False,
+    "AUTH_HEADER_TYPES": ("Bearer",),
+}
 
 ASR_API_URL = "http://36.134.70.149:9005/api/v1/jobs"
 ASR_API_TOKEN = "OYECtTTccG1fOzsT6e8EKXR4sOBHJalv"
