@@ -25,13 +25,13 @@
           <text class="menu-arrow">></text>
         </view>
       </view>
-      <view class="menu-item">
+      <!-- <view class="menu-item">
         <view class="menu-left">
           <view class="menu-icon">密</view>
           <text class="menu-label">隐私与安全</text>
         </view>
         <text class="menu-arrow">></text>
-      </view>
+      </view> -->
     </view>
 
     <!-- 设置组 2 -->
@@ -57,13 +57,13 @@
           <text class="menu-arrow">></text>
         </view>
       </view>
-      <view class="menu-item">
+      <!-- <view class="menu-item">
         <view class="menu-left">
           <view class="menu-icon">关</view>
           <text class="menu-label">关于榕小助</text>
         </view>
         <text class="menu-arrow">></text>
-      </view>
+      </view> -->
     </view>
 
     <!-- 退出登录 -->
