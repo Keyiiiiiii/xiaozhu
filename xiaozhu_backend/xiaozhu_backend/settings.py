@@ -90,8 +90,8 @@ DATABASES = {
     "default": {
         'ENGINE': 'django.db.backends.mysql',
         'NAME': os.environ.get('DB_NAME', 'rongxiaozhu'),
-        'USER': os.environ.get('DB_USER', 'root'),
-        'PASSWORD': os.environ.get('DB_PASSWORD', 'root'),
+        'USER': os.environ.get('DB_USER', 'rongxiaozhu'),
+        'PASSWORD': os.environ.get('DB_PASSWORD', 'fPcwwGsCsejW4G2y'),
         'HOST': os.environ.get('DB_HOST', '127.0.0.1'),
         'PORT': os.environ.get('DB_PORT', '3306'),
         'OPTIONS': {
@@ -143,11 +143,11 @@ STATIC_URL = "static/"
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
-MINIO_ENDPOINT = "localhost:9000"
-MINIO_ACCESS_KEY = "minioadmin"
-MINIO_SECRET_KEY = "minioadmin"
+MINIO_ENDPOINT = "36.212.140.43:8002"
+MINIO_ACCESS_KEY = "minio"
+MINIO_SECRET_KEY = "DPDb78GsKCHPWRdt"
 MINIO_SECURE = False
-MINIO_BUCKET_NAME = "xiaozhu"
+MINIO_BUCKET_NAME = "rongxiaozhu"
 
 AUTH_USER_MODEL = "api.User"
 
@@ -179,7 +179,7 @@ CHANNEL_LAYERS = {
     "default": {
         "BACKEND": "channels_redis.core.RedisChannelLayer",
         "CONFIG": {
-            "hosts": [("127.0.0.1", 6379)],
+            "hosts": [("127.0.0.1", 20003)],
         },
     },
 }
