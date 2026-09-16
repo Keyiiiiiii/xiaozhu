@@ -42,11 +42,11 @@
           <view class="grid-icon bg-blue-light"><text class="icon-text text-blue">录</text></view>
           <text class="grid-text">走访录音</text>
         </view>
-        <view class="grid-item">
+        <view class="grid-item" @click="goToKnowledge">
           <view class="grid-icon bg-cyan-light"><text class="icon-text text-cyan">查</text></view>
           <text class="grid-text">政策查询</text>
         </view>
-        <view class="grid-item">
+        <view class="grid-item" @click="goToTodo">
           <view class="grid-icon bg-orange-light"><text class="icon-text text-orange">办</text></view>
           <text class="grid-text">新建待办</text>
         </view>
@@ -96,6 +96,16 @@ export default {
     goToVisit() {
       uni.switchTab({
         url: '/pages/visit/index'
+      });
+    },
+    goToKnowledge() {
+      uni.switchTab({
+        url: '/pages/knowledge/index'
+      });
+    },
+    goToTodo() {
+      uni.switchTab({
+        url: '/pages/todo/index'
       });
     }
   }
