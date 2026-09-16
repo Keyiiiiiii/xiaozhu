@@ -1,6 +1,7 @@
 import json
 import uuid
 import os
+import unicodedata
 from django.http import JsonResponse, StreamingHttpResponse, HttpResponse
 from django.views.decorators.http import require_POST
 from django.views.decorators.csrf import csrf_exempt
@@ -48,12 +49,19 @@ def knowledge_api(request):
                 workflow_id=workflow_id,
                 workflow_run_id=workflow_run_id
             )
-            
+
             content = ""
-            
+            source_files = []
+
             if isinstance(result, dict):
-                content = result.get("content", "") or result.get("msg", "") or \
-                          result.get("result", "") or result.get("answer", "")
+                # 直接使用 services 已从 metadata.file_name 提取的 source_files，
+                # 不再用 extract_source_files(content) 覆盖（避免丢失真实文件名）
+                source_files = result.get("source_files", []) or []
+                content = result.get("content", "") or ""
+
+                if not content:
+                    content = result.get("msg", "") or result.get("result", "") or \
+                              result.get("answer", "")
                 if not content:
                     content = result.get("outputs", {}).get("result", "")
                 if not content:
@@ -62,13 +70,11 @@ def knowledge_api(request):
                 content = result
             else:
                 content = str(result)
-            
-            source_files = extract_source_files(content)
-            
+
             file_records = []
             if source_files:
                 file_records = get_files_by_titles(source_files)
-            
+
             return JsonResponse({
                 "content": content,
                 "source_files": source_files,
@@ -82,58 +88,78 @@ def knowledge_api(request):
 
 
 def get_files_by_titles(titles: list) -> list:
-    file_records = []
-    
-    all_files = KnowledgeFile.objects.all()
-    db_files = {f.id: f for f in all_files}
-    db_file_names = {f.id: f.file_name.lower() for f in all_files}
-    
+    """
+    根据文件名列表精确查询数据库文件记录。
+
+    入参 titles 是从智能体返回的 metadata.file_name 中提取出的纯文件名
+    （不带路径、不带扩展名，如 "弱电系统按建筑功能分类介绍"）。
+    数据库 KnowledgeFile.file_name 存的也是不带路径、不带扩展名的纯文件名，
+    扩展名存在 file_type 字段。
+    """
+    if not titles:
+        return []
+
+    all_files = list(KnowledgeFile.objects.all())
+    db_index = {}
+    for f in all_files:
+        # NFKC 归一化：把 DB 中的兼容性字符也转为标准形式，确保与入参匹配
+        key = unicodedata.normalize('NFKC', (f.file_name or "").strip().lower())
+        if key:
+            db_index.setdefault(key, []).append(f)
+
+    matched_files = []
+    seen_ids = set()
+
     for title in titles:
-        try:
-            clean_title = title.strip()
-            if clean_title.startswith('#'):
-                clean_title = clean_title[1:].strip()
-            
-            title_lower = clean_title.lower()
-            
-            matched_ids = set()
-            
-            for file_id, db_name in db_file_names.items():
-                if title_lower in db_name or db_name in title_lower:
-                    matched_ids.add(file_id)
-                    continue
-                
-                title_chars = set(clean_title)
-                db_chars = set(db_name)
-                if len(title_chars) > 3 and len(db_chars) > 3:
-                    overlap = title_chars & db_chars
-                    if len(overlap) >= min(len(title_chars), len(db_chars)) * 0.6:
-                        matched_ids.add(file_id)
-            
-            for file_id in matched_ids:
-                if file_id in db_files:
-                    f = db_files[file_id]
-                    full_name = f.file_name
-                    if f.file_type and '.' not in full_name:
-                        full_name = f"{f.file_name}.{f.file_type}"
-                    file_records.append({
-                        "id": f.id,
-                        "file_name": full_name,
-                        "file_url": f.file_url,
-                        "file_size": f.file_size,
-                        "file_type": f.file_type
-                    })
-        except Exception:
-            pass
-    
-    seen = set()
-    unique_records = []
-    for f in file_records:
-        if f['id'] not in seen:
-            seen.add(f['id'])
-            unique_records.append(f)
-    
-    return unique_records
+        if not title or not isinstance(title, str):
+            continue
+
+        clean = title.strip().lstrip('#').strip()
+        # NFKC 归一化：入参也做同样的归一化
+        clean = unicodedata.normalize('NFKC', clean)
+        # 入参可能仍带扩展名（兜底），统一拆出 base_name + ext
+        base_name, ext = os.path.splitext(clean)
+        base_name = unicodedata.normalize('NFKC', base_name.strip())
+        ext = ext.lstrip('.').strip().lower()
+
+        if not base_name:
+            continue
+
+        # 1. 优先按 base_name 精确匹配（大小写不敏感 + NFKC 归一化）
+        candidates = db_index.get(base_name.lower(), [])
+        # 2. 兜底：数据库可能存的是带扩展名的完整名
+        if not candidates:
+            candidates = db_index.get(clean.lower(), [])
+        if not candidates:
+            continue
+
+        # 优先选 file_type 与扩展名一致的；否则取第一个
+        chosen = None
+        if ext:
+            for c in candidates:
+                if (c.file_type or "").strip().lower() == ext:
+                    chosen = c
+                    break
+        if not chosen:
+            chosen = candidates[0]
+
+        if chosen.id in seen_ids:
+            continue
+        seen_ids.add(chosen.id)
+
+        full_name = chosen.file_name
+        if chosen.file_type and '.' not in full_name:
+            full_name = f"{chosen.file_name}.{chosen.file_type}"
+
+        matched_files.append({
+            "id": chosen.id,
+            "file_name": full_name,
+            "file_url": chosen.file_url,
+            "file_size": chosen.file_size,
+            "file_type": chosen.file_type
+        })
+
+    return matched_files
 
 
 @csrf_exempt
