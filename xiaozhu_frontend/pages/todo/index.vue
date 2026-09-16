@@ -346,7 +346,7 @@ export default {
   display: flex;
   flex-direction: column;
   padding-top: var(--status-bar-height);
-  padding-bottom: 80px;
+  padding-bottom: calc(72px + var(--window-bottom));
   box-sizing: border-box;
 }
 .tab-header {
@@ -486,7 +486,7 @@ export default {
   position: fixed;
   left: 0;
   right: 0;
-  bottom: calc(50px + env(safe-area-inset-bottom));
+  bottom: var(--window-bottom);
   padding: 12px 16px;
   background-color: #ffffff;
   border-top: 1px solid #eeeeee;
