@@ -73,7 +73,7 @@
         <textarea
           class="transcript-textarea"
           v-model="recognizedText"
-          :placeholder="isRecording ? '正在识别语音...' : '点击编辑记录内容...'"
+          :placeholder="isRecording ? (isRecognizing ? '正在识别语音...' : '录音中，结束后自动转写...') : '点击编辑记录内容...'"
           :disabled="isRecording"
           auto-height
           maxlength="-1"
@@ -490,11 +490,15 @@ export default {
         this.savedAudioFileName = "";
         this.transcriptCollapsed = false;
         
-        // 先获取 WebSocket URL
-        await this.fetchWebSocketUrl();
-        
-        // 建立 WebSocket 连接
-        await this.openSocket();
+        // 录音与 WebSocket 解耦：录音是核心功能，实时转写是附加功能
+        // 即使 WebSocket 连接失败，录音仍可正常进行（事后通过服务端转写）
+        try {
+          await this.fetchWebSocketUrl();
+          await this.openSocket();
+        } catch (wsError) {
+          console.warn("WebSocket 连接失败，仅录音不做实时转写:", wsError);
+          this.socketConnected = false;
+        }
         
         // #ifdef H5
         await this.startH5Recording();
@@ -507,7 +511,8 @@ export default {
         this.isRecording = true;
         this.recordDuration = 0;
         this.longPressProgress = 0;
-        this.isRecognizing = true;
+        // 仅在 socket 连接成功时才认为正在识别
+        this.isRecognizing = this.socketConnected;
         
         this.timer = setInterval(() => {
           this.recordDuration++;
@@ -537,17 +542,43 @@ export default {
           return;
         }
         
+        // 连接超时保护，防止网络问题导致录音卡死
+        let settled = false;
+        const timeoutId = setTimeout(() => {
+          if (!settled) {
+            settled = true;
+            console.warn("WebSocket 连接超时");
+            reject(new Error("WebSocket 连接超时"));
+          }
+        }, 8000);
+        
+        const onConnected = () => {
+          if (!settled) {
+            settled = true;
+            clearTimeout(timeoutId);
+            this.socketConnected = true;
+            resolve();
+          }
+        };
+        
+        const onFailed = (err) => {
+          if (!settled) {
+            settled = true;
+            clearTimeout(timeoutId);
+            reject(new Error("WebSocket 连接失败"));
+          }
+        };
+        
         // #ifdef H5
         try {
           this.h5Socket = new WebSocket(wsUrl);
           this.h5Socket.onopen = () => {
             console.log("H5 WebSocket 连接成功");
-            this.socketConnected = true;
-            resolve();
+            onConnected();
           };
           this.h5Socket.onerror = (error) => {
             console.error("H5 WebSocket 错误:", error);
-            reject(new Error("WebSocket 连接失败"));
+            onFailed(error);
           };
           this.h5Socket.onmessage = (event) => {
             this.handleMessage(event.data);
@@ -558,7 +589,7 @@ export default {
             this.isRecognizing = false;
           };
         } catch (e) {
-          reject(e);
+          onFailed(e);
         }
         // #endif
         
@@ -570,21 +601,18 @@ export default {
           },
           fail: (err) => {
             console.error("uni.connectSocket 调用失败:", err);
-            reject(new Error("WebSocket 连接失败"));
+            onFailed(err);
           }
         });
         
         this.socketTask.onOpen(() => {
           console.log("WebSocket 连接成功");
-          this.socketConnected = true;
-          resolve();
+          onConnected();
         });
         
         this.socketTask.onError((err) => {
           console.error("WebSocket 错误:", err);
-          if (!this.socketConnected) {
-            reject(new Error("WebSocket 连接失败"));
-          }
+          onFailed(err);
         });
         
         this.socketTask.onMessage((res) => {
@@ -642,12 +670,20 @@ export default {
     },
     
     arrayBufferToBase64(buffer) {
+      // #ifdef H5
+      // H5 端使用浏览器原生 btoa
       let binary = "";
       const bytes = new Uint8Array(buffer);
       for (let i = 0; i < bytes.byteLength; i += 1) {
         binary += String.fromCharCode(bytes[i]);
       }
       return btoa(binary);
+      // #endif
+
+      // #ifndef H5
+      // App / 小程序端没有 btoa，使用 uni 提供的 API
+      return uni.arrayBufferToBase64(buffer);
+      // #endif
     },
     
     resampleAndConvertTo16kPCM(float32Data, inputSampleRate) {
@@ -664,6 +700,18 @@ export default {
     },
     
     sendFrame(audioData, frameStatus) {
+      // #ifdef H5
+      if (!this.h5Socket || this.h5Socket.readyState !== WebSocket.OPEN) {
+        return;
+      }
+      // #endif
+      
+      // #ifndef H5
+      if (!this.socketConnected || !this.socketTask) {
+        return;
+      }
+      // #endif
+      
       const frame = {
         data: {
           status: frameStatus,
@@ -685,40 +733,79 @@ export default {
       const frameStr = JSON.stringify(frame);
       
       // #ifdef H5
-      if (this.h5Socket && this.h5Socket.readyState === WebSocket.OPEN) {
-        this.h5Socket.send(frameStr);
-      }
+      this.h5Socket.send(frameStr);
       // #endif
       
       // #ifndef H5
-      if (this.socketConnected && this.socketTask) {
-        this.socketTask.send({
-          data: frameStr,
-          fail: (err) => {
-            console.error("发送 WebSocket 消息失败:", err);
-          }
-        });
-      }
+      this.socketTask.send({
+        data: frameStr,
+        fail: (err) => {
+          console.error("发送 WebSocket 消息失败:", err);
+        }
+      });
       // #endif
     },
     
     // #ifdef H5
     async startH5Recording() {
+      // 安全上下文检测：getUserMedia 仅在 HTTPS 或 localhost 下可用
+      if (typeof window !== 'undefined' && !window.isSecureContext) {
+        const host = window.location && window.location.hostname ? window.location.hostname : '';
+        const isLocal = host === 'localhost' || host === '127.0.0.1' || host === '0.0.0.0';
+        if (!isLocal) {
+          throw new Error("录音需要 HTTPS 环境，当前页面非安全上下文，请通过 https 访问");
+        }
+      }
+      
       if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-        throw new Error("当前浏览器不支持录音功能");
+        throw new Error("当前浏览器不支持录音功能，请使用最新版 Chrome/Safari");
       }
       
       this.audioChunks = [];
-      this.mediaStream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          sampleRate: 16000,
-          channelCount: 1,
-          echoCancellation: true,
-          noiseSuppression: true
+      try {
+        // 移动端浏览器要求 HTTPS（或 localhost）才能使用 getUserMedia
+        this.mediaStream = await navigator.mediaDevices.getUserMedia({
+          audio: {
+            channelCount: 1,
+            echoCancellation: true,
+            noiseSuppression: true
+          }
+        });
+      } catch (err) {
+        // 处理 DOMException，给出明确的用户提示
+        const errName = err && err.name ? err.name : '';
+        const errMsg = err && err.message ? err.message.toLowerCase() : '';
+        if (errName === 'NotAllowedError' || errMsg.indexOf('permission denied') !== -1 || errMsg.indexOf('permissiondenied') !== -1) {
+          throw new Error("麦克风权限被拒绝，请在浏览器设置中允许使用麦克风后重试");
+        } else if (errName === 'NotFoundError' || errMsg.indexOf('not found') !== -1 || errMsg.indexOf('no device') !== -1) {
+          throw new Error("未检测到麦克风设备");
+        } else if (errName === 'NotReadableError' || errMsg.indexOf('not readable') !== -1 || errMsg.indexOf('occupied') !== -1) {
+          throw new Error("麦克风被其他程序占用，请关闭后重试");
+        } else if (errName === 'SecurityError' || errMsg.indexOf('secure') !== -1) {
+          throw new Error("录音需要 HTTPS 环境，当前页面非安全上下文");
+        } else {
+          throw new Error(`获取麦克风失败: ${err && err.message ? err.message : '未知错误'}`);
         }
-      });
+      }
       
-      this.audioContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
+      // 创建 AudioContext，优先尝试 16kHz，不支持时回退默认采样率
+      const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+      try {
+        this.audioContext = new AudioContextClass({ sampleRate: 16000 });
+      } catch (e) {
+        console.warn("无法创建 16kHz AudioContext，使用默认采样率:", e);
+        this.audioContext = new AudioContextClass();
+      }
+      
+      // 关键：移动端浏览器 AudioContext 默认 suspended，必须 resume 后才会触发 onaudioprocess
+      if (this.audioContext.state === 'suspended') {
+        try {
+          await this.audioContext.resume();
+        } catch (e) {
+          console.warn("AudioContext resume 失败:", e);
+        }
+      }
+      
       const source = this.audioContext.createMediaStreamSource(this.mediaStream);
       this.processor = this.audioContext.createScriptProcessor(4096, 1, 1);
       
@@ -728,8 +815,11 @@ export default {
         
         this.audioChunks.push(new Int16Array(pcm));
         
-        this.sendFrame(pcm, this.firstFrame ? FRAME.FIRST : FRAME.CONTINUE);
-        this.firstFrame = false;
+        // 仅在 WebSocket 已连接时发送，并保证首帧标记正确
+        if (this.h5Socket && this.h5Socket.readyState === WebSocket.OPEN) {
+          this.sendFrame(pcm, this.firstFrame ? FRAME.FIRST : FRAME.CONTINUE);
+          this.firstFrame = false;
+        }
       };
       
       source.connect(this.processor);
@@ -767,7 +857,10 @@ export default {
     },
     
     async saveH5Audio() {
-      if (this.audioChunks.length === 0) return;
+      if (this.audioChunks.length === 0) {
+        console.warn("未捕获到音频数据");
+        return;
+      }
       
       const sampleRate = 16000;
       const numChannels = 1;
@@ -794,15 +887,7 @@ export default {
       this.savedAudioFileName = fileName;
       this.savedAudioPath = URL.createObjectURL(blob);
       
-      try {
-        const link = document.createElement('a');
-        link.href = this.savedAudioPath;
-        link.download = fileName;
-        link.click();
-        console.log("H5 音频已保存（触发下载）:", fileName);
-      } catch (e) {
-        console.error("保存音频失败:", e);
-      }
+      console.log("H5 音频已保存:", fileName);
     },
     
     pcmToWav(pcmBuffer, sampleRate, numChannels, bytesPerSample) {
@@ -846,38 +931,66 @@ export default {
         throw new Error("没有麦克风权限");
       }
       
-      if (!this.recorderManager) {
-        this.recorderManager = uni.getRecorderManager();
+      const self = this;
+      // 使用 Promise 等待 onStart 或 onError，确保录音真正启动
+      return new Promise((resolve, reject) => {
+        if (!this.recorderManager) {
+          this.recorderManager = uni.getRecorderManager();
+          
+          this.recorderManager.onStart(() => {
+            console.log('App 录音开始');
+          });
+          
+          this.recorderManager.onStop((res) => {
+            console.log('App 录音停止:', res);
+            if (res && res.tempFilePath) {
+              this.recordFilePath = res.tempFilePath;
+              this.saveAppAudio();
+            } else {
+              console.error('App 录音停止但未获取到文件路径');
+            }
+          });
+          
+          this.recorderManager.onError((err) => {
+            console.error('App 录音错误:', err);
+            // 通过自定义事件通知录音启动失败
+            uni.$emit('recorder-error', err);
+          });
+          
+          this.recorderManager.onFrameRecorded((res) => {
+            if (res.frameBuffer && self.socketConnected) {
+              try {
+                self.sendFrame(res.frameBuffer, self.firstFrame ? FRAME.FIRST : FRAME.CONTINUE);
+                self.firstFrame = false;
+              } catch (e) {
+                console.error('发送音频帧失败:', e);
+              }
+            }
+          });
+        }
         
-        this.recorderManager.onStart(() => {
-          console.log('App 录音开始');
+        // 监听一次性错误事件，用于 reject 当前 Promise
+        const onErrorOnce = (err) => {
+          uni.$off('recorder-error', onErrorOnce);
+          reject(new Error('录音启动失败: ' + (err && err.errMsg ? err.errMsg : '未知错误')));
+        };
+        uni.$on('recorder-error', onErrorOnce);
+        
+        // 启动录音，3 秒内未触发 onError 视为成功
+        this.recorderManager.start({
+          duration: 600000,
+          sampleRate: 16000,
+          numberOfChannels: 1,
+          format: 'wav',
+          frameSize: 4
+          // 注意：encodeBitRate 仅对 aac/mp3 等压缩格式有效，wav 格式不应设置
         });
         
-        this.recorderManager.onStop((res) => {
-          console.log('App 录音停止:', res);
-          this.recordFilePath = res.tempFilePath;
-          this.saveAppAudio();
-        });
-        
-        this.recorderManager.onError((err) => {
-          console.error('App 录音错误:', err);
-        });
-        
-        this.recorderManager.onFrameRecorded((res) => {
-          if (res.frameBuffer) {
-            this.sendFrame(res.frameBuffer, this.firstFrame ? FRAME.FIRST : FRAME.CONTINUE);
-            this.firstFrame = false;
-          }
-        });
-      }
-      
-      this.recorderManager.start({
-        duration: 600000,
-        sampleRate: 16000,
-        numberOfChannels: 1,
-        encodeBitRate: 48000,
-        format: 'wav',
-        frameSize: 4
+        // 延迟 resolve，给录音启动留出时间
+        setTimeout(() => {
+          uni.$off('recorder-error', onErrorOnce);
+          resolve();
+        }, 300);
       });
     },
     
@@ -887,15 +1000,23 @@ export default {
       }
       
       if (sendLastFrame && this.socketConnected) {
-        this.sendFrame(new ArrayBuffer(0), FRAME.LAST);
+        try {
+          this.sendFrame(new ArrayBuffer(0), FRAME.LAST);
+        } catch (e) {
+          console.error('发送末帧失败:', e);
+        }
       }
       
       setTimeout(() => {
         if (this.socketTask) {
-          this.socketTask.close();
+          try {
+            this.socketTask.close();
+          } catch (e) {
+            console.error('关闭 socket 失败:', e);
+          }
           this.socketTask = null;
         }
-      }, sendLastFrame ? 1800 : 0);
+      }, sendLastFrame && this.socketConnected ? 1800 : 0);
     },
     
     async saveAppAudio() {
@@ -997,17 +1118,23 @@ export default {
       
       try {
         // #ifdef H5
-        await this.stopH5Recording(true);
+        await this.stopH5Recording(this.socketConnected);
         // #endif
         
         // #ifdef APP-PLUS
-        this.stopAppRecording(true);
+        this.stopAppRecording(this.socketConnected);
         // #endif
         
-        setTimeout(() => {
+        // 若 socket 未连接，无需等待实时转写完成
+        if (this.socketConnected) {
+          setTimeout(() => {
+            this.isRecognizing = false;
+            this.hasRecorded = true;
+          }, 2000);
+        } else {
           this.isRecognizing = false;
           this.hasRecorded = true;
-        }, 2000);
+        }
         
       } catch (error) {
         console.error("停止录音失败:", error);
@@ -1565,6 +1692,7 @@ export default {
     cleanupRecording() {
       this.isRecording = false;
       this.isRecognizing = false;
+      this.socketConnected = false;
       
       if (this.timer) {
         clearInterval(this.timer);
@@ -1575,7 +1703,11 @@ export default {
       
       // #ifdef H5
       if (this.processor) {
-        this.processor.disconnect();
+        try {
+          this.processor.disconnect();
+        } catch (e) {
+          console.error("断开 processor 失败:", e);
+        }
         this.processor = null;
       }
       if (this.audioContext) {
@@ -1587,14 +1719,22 @@ export default {
         this.mediaStream = null;
       }
       if (this.h5Socket) {
-        this.h5Socket.close();
+        try {
+          this.h5Socket.close();
+        } catch (e) {
+          console.error("关闭 H5 WebSocket 失败:", e);
+        }
         this.h5Socket = null;
       }
       // #endif
       
       // #ifndef H5
       if (this.socketTask) {
-        this.socketTask.close();
+        try {
+          this.socketTask.close();
+        } catch (e) {
+          console.error("关闭 socketTask 失败:", e);
+        }
         this.socketTask = null;
       }
       // #endif
