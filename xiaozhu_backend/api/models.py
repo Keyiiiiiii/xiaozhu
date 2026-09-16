@@ -8,11 +8,68 @@ from django.contrib.auth.models import AbstractUser
 
 
 # =====================================================================
-# 1. User (用户表)
+# 1. Permission / Role (权限点与角色)
+# =====================================================================
+class Permission(models.Model):
+    """
+    Feature-level permission codes used for authorization across the app.
+    """
+    code = models.CharField(
+        max_length=100,
+        unique=True,
+        verbose_name="权限编码",
+    )
+    name = models.CharField(
+        max_length=100,
+        verbose_name="权限名称",
+    )
+
+    class Meta:
+        verbose_name = "权限点"
+        verbose_name_plural = verbose_name
+
+    def __str__(self):
+        return f"{self.name} ({self.code})"
+
+
+class Role(models.Model):
+    """
+    Personnel levels (frontline / district / city) bound to permission codes.
+    """
+    code = models.CharField(
+        max_length=50,
+        unique=True,
+        verbose_name="角色编码",
+    )
+    name = models.CharField(
+        max_length=100,
+        verbose_name="角色名称",
+    )
+    level = models.PositiveSmallIntegerField(
+        verbose_name="层级",
+    )
+    permissions = models.ManyToManyField(
+        Permission,
+        blank=True,
+        related_name="roles",
+        verbose_name="权限点",
+    )
+
+    class Meta:
+        verbose_name = "角色"
+        verbose_name_plural = verbose_name
+        ordering = ["level"]
+
+    def __str__(self):
+        return self.name
+
+
+# =====================================================================
+# 2. User (用户表)
 # =====================================================================
 class User(AbstractUser):
     """
-    User model containing work ID, name, role ID, and organization.
+    User model containing work ID, name, role, and organization text.
     """
     work_id = models.CharField(
         max_length=50, 
@@ -23,9 +80,13 @@ class User(AbstractUser):
         max_length=100, 
         verbose_name="姓名"
     )
-    role_id = models.CharField(
-        max_length=50, 
-        verbose_name="角色ID"
+    role = models.ForeignKey(
+        Role,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="users",
+        verbose_name="角色",
     )
     organization = models.CharField(
         max_length=150, 
@@ -38,7 +99,7 @@ class User(AbstractUser):
 
 
 # =====================================================================
-# 2. VisitRecord (走访记录表)
+# 3. VisitRecord (走访记录表)
 # =====================================================================
 class VisitRecord(models.Model):
     """
@@ -106,16 +167,20 @@ class VisitRecord(models.Model):
 
 
 # =====================================================================
-# 3. TodoItem (待办事项表)
+# 4. TodoItem (待办事项表)
 # =====================================================================
 class TodoItem(models.Model):
     """
-    To-do items with trigger options and state closing loop.
+    To-do events with priority and closed-loop status.
     """
     STATUS_CHOICES = [
         ("pending", "未办"),
         ("ongoing", "进行中"),
-        ("closed", "闭环"),
+        ("closed", "已闭环"),
+    ]
+    PRIORITY_CHOICES = [
+        ("normal", "常规"),
+        ("high", "高优"),
     ]
 
     owner = models.ForeignKey(
@@ -130,23 +195,36 @@ class TodoItem(models.Model):
         blank=True, 
         verbose_name="关联走访记录"
     )
-    content = models.TextField(
-        verbose_name="事项内容"
+    title = models.CharField(
+        max_length=250,
+        default="",
+        verbose_name="标题",
     )
-    trigger_type = models.CharField(
-        max_length=50, 
-        verbose_name="触发类型"
+    event_date = models.DateField(
+        null=True,
+        blank=True,
+        verbose_name="日期",
     )
-    trigger_value = models.CharField(
-        max_length=200, 
-        blank=True, 
-        verbose_name="触发阈值"
+    event_time = models.TimeField(
+        null=True,
+        blank=True,
+        verbose_name="时间",
+    )
+    priority = models.CharField(
+        max_length=20,
+        choices=PRIORITY_CHOICES,
+        default="normal",
+        verbose_name="优先级",
     )
     status = models.CharField(
         max_length=20, 
         choices=STATUS_CHOICES, 
         default="pending",
         verbose_name="状态"
+    )
+    is_ai_generated = models.BooleanField(
+        default=False,
+        verbose_name="是否AI生成",
     )
 
     class Meta:
@@ -155,7 +233,7 @@ class TodoItem(models.Model):
 
 
 # =====================================================================
-# 4. Notification (通知分发表)
+# 5. Notification (通知分发表)
 # =====================================================================
 class Notification(models.Model):
     """
@@ -172,9 +250,13 @@ class Notification(models.Model):
     content = models.TextField(
         verbose_name="内容"
     )
-    level = models.CharField(
-        max_length=50, 
-        verbose_name="发送层级"
+    level = models.ForeignKey(
+        Role,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="notifications",
+        verbose_name="发送层级",
     )
     sender = models.ForeignKey(
         User,
@@ -197,16 +279,19 @@ class Notification(models.Model):
 
 
 # =====================================================================
-# 5. QuotaRule (通知额度规则表)
+# 6. QuotaRule (通知额度规则表)
 # =====================================================================
 class QuotaRule(models.Model):
     """
     Monthly configurations for notification quotas and thresholds.
     """
-    level = models.CharField(
-        max_length=50, 
-        unique=True, 
-        verbose_name="配置层级/专项"
+    level = models.OneToOneField(
+        Role,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="quota_rule",
+        verbose_name="配置层级",
     )
     monthly_quota = models.IntegerField(
         verbose_name="月度推送配额"
@@ -218,7 +303,7 @@ class QuotaRule(models.Model):
 
 
 # =====================================================================
-# 6. AppVersion (应用版本表)
+# 7. AppVersion (应用版本表)
 # =====================================================================
 class AppVersion(models.Model):
     """
