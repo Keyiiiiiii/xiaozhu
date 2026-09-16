@@ -2,12 +2,14 @@ import json
 import uuid
 import os
 import unicodedata
+from datetime import datetime
 from django.http import JsonResponse, StreamingHttpResponse, HttpResponse
-from django.views.decorators.http import require_POST
+from django.views.decorators.http import require_POST, require_GET
 from django.views.decorators.csrf import csrf_exempt
 from file_upload.minio_client import upload_file_to_minio, get_file_from_minio
 from .services import call_knowledge_api_streaming, call_knowledge_api_non_streaming, extract_workflow_result, extract_source_files
-from .models import KnowledgeFile
+from .models import KnowledgeFile, Ticket, TicketFile
+from api.auth_utils import get_user_from_request
 
 
 @csrf_exempt
@@ -276,3 +278,376 @@ def get_content_type(file_name):
         '.gif': 'image/gif',
     }
     return mime_types.get(ext, 'application/octet-stream')
+
+
+# =====================================================================
+# 工单系统 API
+# =====================================================================
+
+def _serialize_ticket(ticket, include_attachments=True, for_user=None):
+    """
+    把 Ticket 模型实例转为前端可消费的 dict。
+    for_user 用于做字段级权限控制（如 manager_answer 对上报人也可见，
+    但 manager_note 仅产品经理/保障人可见）。
+    """
+    d = {
+        "id": ticket.id,
+        "question": ticket.question,
+        "agent_answer": ticket.agent_answer,
+        "reason": ticket.reason,
+        "manager_answer": ticket.manager_answer,
+        "manager_note": ticket.manager_note,
+        "status": ticket.status,
+        "status_display": ticket.get_status_display(),
+        "reporter_id": ticket.reporter_id,
+        "reporter_name": getattr(ticket.reporter, "name", None),
+        "reporter_work_id": getattr(ticket.reporter, "work_id", None),
+        "handler_id": ticket.handler_id,
+        "handler_name": getattr(ticket.handler, "name", None),
+        "related_file_id": ticket.related_file_id,
+        "related_file_name": ticket.related_file_name,
+        "resolved_at": ticket.resolved_at.isoformat() if ticket.resolved_at else None,
+        "closed_at": ticket.closed_at.isoformat() if ticket.closed_at else None,
+        "created_at": ticket.created_at.isoformat(),
+        "updated_at": ticket.updated_at.isoformat(),
+    }
+    if include_attachments:
+        d["attachments"] = [
+            {
+                "id": a.id,
+                "file_name": a.file_name,
+                "file_url": a.file_url,
+                "file_size": a.file_size,
+                "uploaded_at": a.uploaded_at.isoformat(),
+            }
+            for a in ticket.attachments.all()
+        ]
+    # manager_note 仅经理/保障人可见
+    if for_user and getattr(for_user, "role_id", "") not in ("pm", "guard"):
+        d.pop("manager_note", None)
+    return d
+
+
+def _get_current_user(request):
+    """优先从 JWT 取用户，失败则尝试 work_id 回退（内部调用无 token 时）。"""
+    user = get_user_from_request(request)
+    if user is not None:
+        return user
+    # 兜底：允许通过 query 参数 work_id 定位（开发/内部调用用）
+    work_id = request.GET.get("work_id") or request.POST.get("work_id")
+    if work_id:
+        from api.models import User
+        try:
+            return User.objects.get(work_id=work_id)
+        except User.DoesNotExist:
+            return None
+    return None
+
+
+# -------- 1. 创建工单（问题上报） --------
+
+@csrf_exempt
+@require_POST
+def ticket_create(request):
+    """
+    POST /api/knowledge/tickets/
+    客户经理前端点"问题上报"时调用。
+
+    Request JSON:
+        question      (str, 必填) 用户的原始问题
+        agent_answer  (str, 可选) 智能体当时给出的回答
+        reason        (str, 可选) 用户认为没解决的原因/补充描述
+    """
+    user = _get_current_user(request)
+    if user is None:
+        return JsonResponse({"status": "error", "message": "未登录"}, status=401)
+
+    try:
+        data = json.loads(request.body)
+    except json.JSONDecodeError:
+        return JsonResponse({"status": "error", "message": "请求体格式错误"}, status=400)
+
+    question = (data.get("question") or "").strip()
+    if not question:
+        return JsonResponse({"status": "error", "message": "问题内容不能为空"}, status=400)
+
+    ticket = Ticket.objects.create(
+        question=question,
+        agent_answer=data.get("agent_answer") or "",
+        reason=data.get("reason") or "",
+        reporter=user,
+        status="pending",
+    )
+
+    return JsonResponse({
+        "status": "success",
+        "message": "工单创建成功",
+        "data": _serialize_ticket(ticket),
+    }, status=201)
+
+
+# -------- 2. 工单列表 --------
+
+@csrf_exempt
+@require_GET
+def ticket_list(request):
+    """
+    GET /api/knowledge/tickets/
+
+    Query params:
+        status   筛选状态
+        role     "pm"→经理视角看全部 pending/processing/resolved；"gm"→客户经理看自己的
+        work_id  兜底（无 token 时）
+    """
+    user = _get_current_user(request)
+    if user is None:
+        return JsonResponse({"status": "error", "message": "未登录"}, status=401)
+
+    status = request.GET.get("status")
+    role = request.GET.get("role") or getattr(user, "role_id", "")
+
+    qs = Ticket.objects.all()
+
+    if role == "gm":
+        # 客户经理：只能看自己上报的
+        qs = qs.filter(reporter=user)
+    elif role in ("pm", "guard"):
+        # 产品经理 / 保障人：看所有未闭环的
+        qs = qs.exclude(status="closed")
+    else:
+        # 默认：看自己上报的
+        qs = qs.filter(reporter=user)
+
+    if status:
+        qs = qs.filter(status=status)
+
+    tickets = [_serialize_ticket(t, include_attachments=False, for_user=user) for t in qs]
+    return JsonResponse({"status": "success", "data": tickets})
+
+
+# -------- 3. 工单详情 --------
+
+@csrf_exempt
+@require_GET
+def ticket_detail(request, ticket_id):
+    """GET /api/knowledge/tickets/<id>/"""
+    user = _get_current_user(request)
+    if user is None:
+        return JsonResponse({"status": "error", "message": "未登录"}, status=401)
+
+    try:
+        ticket = Ticket.objects.get(id=ticket_id)
+    except Ticket.DoesNotExist:
+        return JsonResponse({"status": "error", "message": "工单不存在"}, status=404)
+
+    # 权限：上报人可看自己的，经理/保障人可看所有
+    role = getattr(user, "role_id", "")
+    if ticket.reporter_id != user.id and role not in ("pm", "guard"):
+        return JsonResponse({"status": "error", "message": "无权查看此工单"}, status=403)
+
+    return JsonResponse({
+        "status": "success",
+        "data": _serialize_ticket(ticket, for_user=user),
+    })
+
+
+# -------- 4. 产品经理：解答工单 --------
+
+@csrf_exempt
+@require_POST
+def ticket_answer(request, ticket_id):
+    """
+    POST /api/knowledge/tickets/<id>/answer/
+    产品经理填写正式回答。
+
+    Request JSON:
+        manager_answer (str, 必填)
+        manager_note   (str, 可选，内部备注)
+        status         (str, 可选) 默认 "resolved"，也可传 "processing" 先接手不解答
+    """
+    user = _get_current_user(request)
+    if user is None:
+        return JsonResponse({"status": "error", "message": "未登录"}, status=401)
+
+    if getattr(user, "role_id", "") not in ("pm", "guard"):
+        return JsonResponse({"status": "error", "message": "仅产品经理/保障人可解答工单"}, status=403)
+
+    try:
+        ticket = Ticket.objects.get(id=ticket_id)
+    except Ticket.DoesNotExist:
+        return JsonResponse({"status": "error", "message": "工单不存在"}, status=404)
+
+    try:
+        data = json.loads(request.body)
+    except json.JSONDecodeError:
+        return JsonResponse({"status": "error", "message": "请求体格式错误"}, status=400)
+
+    answer = (data.get("manager_answer") or "").strip()
+    manager_note = data.get("manager_note") or ""
+    new_status = data.get("status") or "resolved"
+
+    if new_status == "resolved" and not answer:
+        return JsonResponse({"status": "error", "message": "解答内容不能为空"}, status=400)
+
+    ticket.handler = user
+    ticket.manager_answer = answer
+    if manager_note:
+        ticket.manager_note = manager_note
+
+    if new_status == "processing":
+        ticket.status = "processing"
+    elif new_status == "resolved":
+        ticket.status = "resolved"
+        ticket.resolved_at = datetime.now()
+
+    ticket.save()
+
+    return JsonResponse({
+        "status": "success",
+        "message": "工单已更新",
+        "data": _serialize_ticket(ticket, for_user=user),
+    })
+
+
+# -------- 5. 产品经理：闭环（关联知识库条目） --------
+
+@csrf_exempt
+@require_POST
+def ticket_close(request, ticket_id):
+    """
+    POST /api/knowledge/tickets/<id>/close/
+    产品经理解答后，将工单关联到一条知识库文件，完成闭环。
+
+    Request JSON:
+        related_file_id (int, 可选) 已有的 KnowledgeFile.id
+        或
+        new_file_name   (str, 可选) 想上传到知识库的文件名（走 file_upload 接口）
+    """
+    user = _get_current_user(request)
+    if user is None:
+        return JsonResponse({"status": "error", "message": "未登录"}, status=401)
+
+    if getattr(user, "role_id", "") not in ("pm", "guard"):
+        return JsonResponse({"status": "error", "message": "仅产品经理/保障人可闭环工单"}, status=403)
+
+    try:
+        ticket = Ticket.objects.get(id=ticket_id)
+    except Ticket.DoesNotExist:
+        return JsonResponse({"status": "error", "message": "工单不存在"}, status=404)
+
+    try:
+        data = json.loads(request.body)
+    except json.JSONDecodeError:
+        return JsonResponse({"status": "error", "message": "请求体格式错误"}, status=400)
+
+    related_file_id = data.get("related_file_id")
+
+    if related_file_id:
+        try:
+            kf = KnowledgeFile.objects.get(id=related_file_id)
+            ticket.related_file = kf
+            ticket.related_file_name = f"{kf.file_name}.{kf.file_type}" if kf.file_type else kf.file_name
+        except KnowledgeFile.DoesNotExist:
+            return JsonResponse({"status": "error", "message": "知识库文件不存在"}, status=404)
+
+    ticket.status = "closed"
+    ticket.closed_at = datetime.now()
+    # 确保 resolved_at 有值
+    if not ticket.resolved_at:
+        ticket.resolved_at = datetime.now()
+    ticket.save()
+
+    # 通知保障人（复用 api.models.Notification）
+    try:
+        from api.models import Notification, User
+        guards = User.objects.filter(role_id="guard")
+        for guard in guards:
+            Notification.objects.create(
+                title=f"工单 #{ticket.id} 已闭环",
+                content=f"问题：{ticket.question[:80]}\n经理：{ticket.handler.name if ticket.handler else '-'}\n已关联知识库：{ticket.related_file_name or '未关联'}",
+                level="guard",
+                sender=user,
+            )
+    except Exception:
+        pass  # 通知失败不阻塞主流程
+
+    return JsonResponse({
+        "status": "success",
+        "message": "工单已闭环",
+        "data": _serialize_ticket(ticket, for_user=user),
+    })
+
+
+# -------- 6. 工单附件上传 --------
+
+@csrf_exempt
+@require_POST
+def ticket_upload(request, ticket_id):
+    """
+    POST /api/knowledge/tickets/<id>/upload/
+    为工单追加附件（截图、需求文档等）。
+
+    优先支持 multipart/form-data（文件直传 MinIO），
+    也支持 JSON 传 file_url（已上传过的文件复用 URL）。
+    """
+    user = _get_current_user(request)
+    if user is None:
+        return JsonResponse({"status": "error", "message": "未登录"}, status=401)
+
+    try:
+        ticket = Ticket.objects.get(id=ticket_id)
+    except Ticket.DoesNotExist:
+        return JsonResponse({"status": "error", "message": "工单不存在"}, status=404)
+
+    saved = []
+
+    # 方式 1：multipart 直传
+    if request.FILES:
+        for key in ("file", "files", "file[]", "files[]"):
+            if key in request.FILES:
+                files = request.FILES[key]
+                if not isinstance(files, list):
+                    files = [files]
+                for f in files:
+                    if not f.name:
+                        continue
+                    object_name = f"{uuid.uuid4().hex}{os.path.splitext(f.name)[1]}"
+                    result = upload_file_to_minio(f, object_name)
+                    if result["success"]:
+                        tf = TicketFile.objects.create(
+                            ticket=ticket,
+                            file_name=f.name,
+                            file_url=result["url"],
+                            file_size=f.size,
+                            uploaded_by=user,
+                        )
+                        saved.append({"id": tf.id, "file_name": tf.file_name, "file_url": tf.file_url})
+                break
+
+    # 方式 2：JSON 传 file_url
+    if not saved and request.body:
+        try:
+            data = json.loads(request.body)
+            file_url = data.get("file_url")
+            file_name = data.get("file_name") or "attachment"
+            if file_url:
+                tf = TicketFile.objects.create(
+                    ticket=ticket,
+                    file_name=file_name,
+                    file_url=file_url,
+                    file_size=data.get("file_size"),
+                    uploaded_by=user,
+                )
+                saved.append({"id": tf.id, "file_name": tf.file_name, "file_url": tf.file_url})
+        except json.JSONDecodeError:
+            pass
+
+    if not saved:
+        return JsonResponse({"status": "error", "message": "未收到可上传的文件"}, status=400)
+
+    return JsonResponse({
+        "status": "success",
+        "message": f"上传 {len(saved)} 个附件",
+        "data": saved,
+    })
+
