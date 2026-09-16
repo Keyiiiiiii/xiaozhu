@@ -2,6 +2,7 @@ import uuid
 import os
 import time
 import threading
+import json
 import requests
 from io import BytesIO
 from datetime import datetime
@@ -321,8 +322,35 @@ def summarize_record(request):
             "message": "原始转写文本为空，无法进行总结"
         }, status=400)
 
+    # original_text 可能是 dict（含 segments 字段，来自 ASR 轮询）、JSON 字符串
+    # （来自 update_original_text 接口）或直接是 segments 数组
+    if isinstance(original_text, str):
+        try:
+            original_text = json.loads(original_text)
+        except (json.JSONDecodeError, ValueError) as e:
+            return JsonResponse({
+                "status": "error",
+                "message": f"原始转写文本格式错误，无法解析为 JSON: {str(e)}"
+            }, status=400)
+
+    if isinstance(original_text, dict):
+        segments = original_text.get('segments', [])
+    elif isinstance(original_text, list):
+        segments = original_text
+    else:
+        return JsonResponse({
+            "status": "error",
+            "message": "原始转写文本格式不支持总结"
+        }, status=400)
+
+    if not segments:
+        return JsonResponse({
+            "status": "error",
+            "message": "原始转写文本为空，无法进行总结"
+        }, status=400)
+
     try:
-        response = call_llm_api(API_URL, API_KEY, original_text['segments'], str(creator_id), False)
+        response = call_llm_api(API_URL, API_KEY, segments, str(creator_id), False)
 
         if isinstance(response, str):
             return JsonResponse({
