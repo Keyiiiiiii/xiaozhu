@@ -24,4 +24,5 @@ urlpatterns = [
     path("api/file/", include("file_upload.urls")),
     path("api/knowledge/", include("knowledge.urls")),
     path("api/knowledge", include("knowledge.urls")),
+    path("api/version/", include("api.version_urls")),
 ]
