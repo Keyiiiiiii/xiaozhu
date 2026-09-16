@@ -185,3 +185,6 @@ CHANNEL_LAYERS = {
 }
 KNOWLEDGE_API_URL = "http://36.212.132.154:30086/berry-apps/server/apps/api"
 KNOWLEDGE_API_KEY = "GtjGSJ2V4rrQP-rg457sbi3BDJM7vyDv"
+
+ToDo_API_URL = "http://36.212.132.154:30086/berry-apps/server/apps/api"
+ToDo_API_KEY = "UYqnCSJIEskbSF3tGIDyaKqL65hZ2FcO"
