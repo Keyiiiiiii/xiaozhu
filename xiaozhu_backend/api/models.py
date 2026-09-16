@@ -223,27 +223,67 @@ class QuotaRule(models.Model):
 class AppVersion(models.Model):
     """
     Mobile application version configurations supporting forced updates.
+
+    更新类型 update_type 与概要设计文档保持一致：
+      0: 提示热更 (WGT 资源包，可取消)
+      1: 强制热更 (WGT 资源包，不可取消)
+      2: 提示整包 (APK/IPA，可取消)
+      3: 强制整包 (APK/IPA，不可取消)
     """
+    PLATFORM_CHOICES = [
+        ("Android", "Android"),
+        ("iOS", "iOS"),
+    ]
+    UPDATE_TYPE_CHOICES = [
+        (0, "提示热更"),
+        (1, "强制热更"),
+        (2, "提示整包"),
+        (3, "强制整包"),
+    ]
+
     platform = models.CharField(
-        max_length=20, 
-        verbose_name="平台类型"
+        max_length=20,
+        choices=PLATFORM_CHOICES,
+        verbose_name="平台类型",
     )
     version = models.CharField(
-        max_length=50, 
-        verbose_name="版本号"
+        max_length=50,
+        verbose_name="版本号",
+    )
+    version_code = models.IntegerField(
+        verbose_name="构建号",
+    )
+    update_type = models.IntegerField(
+        choices=UPDATE_TYPE_CHOICES,
+        default=0,
+        verbose_name="更新类型",
     )
     download_url = models.URLField(
-        max_length=500, 
-        verbose_name="资源包/安装包URL"
-    )
-    is_forced = models.BooleanField(
-        default=False, 
-        verbose_name="是否强制更新标识"
+        max_length=500,
+        verbose_name="下载包URL",
     )
     changelog = models.TextField(
-        verbose_name="更新日志说明"
+        blank=True,
+        default="",
+        verbose_name="更新日志说明",
+    )
+    is_silent = models.BooleanField(
+        default=False,
+        verbose_name="是否静默更新",
+    )
+    is_active = models.BooleanField(
+        default=True,
+        verbose_name="是否启用",
+    )
+    created_at = models.DateTimeField(
+        auto_now_add=True,
+        verbose_name="创建时间",
     )
 
     class Meta:
         verbose_name = "应用版本"
         verbose_name_plural = verbose_name
+        ordering = ["-version_code", "-created_at"]
+        indexes = [
+            models.Index(fields=["platform", "is_active"]),
+        ]

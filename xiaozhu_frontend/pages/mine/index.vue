@@ -36,23 +36,24 @@
 
     <!-- 设置组 2 -->
     <view class="menu-group">
-      <view class="menu-item">
+      <view class="menu-item" @click="handleClearCache">
         <view class="menu-left">
           <view class="menu-icon">存</view>
           <text class="menu-label">清理缓存</text>
         </view>
         <view class="menu-right">
-          <text class="menu-value">12.5 MB</text>
+          <text class="menu-value">{{ cacheSizeText }}</text>
           <text class="menu-arrow">></text>
         </view>
       </view>
-      <view class="menu-item">
+      <view class="menu-item" @click="handleCheckUpdate">
         <view class="menu-left">
           <view class="menu-icon">新</view>
           <text class="menu-label">版本更新</text>
         </view>
         <view class="menu-right">
-          <text class="menu-value">当前 v1.0.0</text>
+          <text class="menu-value" v-if="checkingUpdate">检查中...</text>
+          <text class="menu-value" v-else>当前 v{{ currentVersion }}</text>
           <text class="menu-arrow">></text>
         </view>
       </view>
@@ -75,6 +76,8 @@
 <script>
 import { mapState, mapMutations } from 'vuex';
 import loginApi from '@/api/login.js';
+import versionApi, { getAppVersionInfo } from '@/api/version.js';
+import cacheUtil from '@/common/cache.js';
 
 const STORAGE_KEY = 'notification_settings';
 
@@ -85,7 +88,10 @@ export default {
         notificationEnabled: true,
         soundEnabled: true,
         vibrateEnabled: true
-      }
+      },
+      cacheSizeText: '0 B',
+      currentVersion: '1.0.0',
+      checkingUpdate: false
     };
   },
   computed: {
@@ -101,6 +107,8 @@ export default {
   },
   onShow() {
     this.loadNotificationSettings();
+    this.refreshCacheSize();
+    this.loadCurrentVersion();
   },
   methods: {
     ...mapMutations(['logout']),
@@ -118,6 +126,240 @@ export default {
       uni.navigateTo({
         url: '/pages/mine/notification-settings'
       });
+    },
+    // 缓存管理
+    refreshCacheSize() {
+      try {
+        const size = cacheUtil.getCacheSize();
+        this.cacheSizeText = cacheUtil.formatSize(size);
+      } catch (e) {
+        console.error('获取缓存大小失败:', e);
+        this.cacheSizeText = '0 B';
+      }
+    },
+    handleClearCache() {
+      uni.showModal({
+        title: '清理缓存',
+        content: `当前占用 ${this.cacheSizeText}，将清理录音临时文件及非关键缓存。`,
+        confirmText: '清理',
+        confirmColor: '#0085D0',
+        success: (res) => {
+          if (!res.confirm) return;
+          uni.showLoading({ title: '清理中...', mask: true });
+          cacheUtil
+            .clearCache()
+            .then((remain) => {
+              this.cacheSizeText = cacheUtil.formatSize(remain);
+              uni.hideLoading();
+              uni.showToast({ title: '清理完成', icon: 'success' });
+            })
+            .catch(() => {
+              uni.hideLoading();
+              uni.showToast({ title: '清理失败', icon: 'none' });
+            });
+        }
+      });
+    },
+    // 版本管理
+    loadCurrentVersion() {
+      try {
+        const info = getAppVersionInfo();
+        this.currentVersion = info.version || '1.0.0';
+      } catch (e) {
+        this.currentVersion = '1.0.0';
+      }
+    },
+    handleCheckUpdate() {
+      if (this.checkingUpdate) return;
+
+      // #ifndef APP-PLUS
+      uni.showModal({
+        title: '版本更新',
+        content: `当前版本 v${this.currentVersion}，非 App 环境暂不支持在线更新。`,
+        showCancel: false,
+        confirmText: '知道了',
+        confirmColor: '#0085D0'
+      });
+      return;
+      // #endif
+
+      // #ifdef APP-PLUS
+      this.checkingUpdate = true;
+      uni.showLoading({ title: '检查更新中...', mask: true });
+
+      versionApi
+        .checkUpdate()
+        .then((result) => {
+          uni.hideLoading();
+          this.checkingUpdate = false;
+
+          if (!result || !result.update_type) {
+            uni.showModal({
+              title: '版本更新',
+              content: `当前已是最新版本 v${this.currentVersion}`,
+              showCancel: false,
+              confirmText: '知道了',
+              confirmColor: '#0085D0'
+            });
+            return;
+          }
+          this.handleUpdateResult(result);
+        })
+        .catch((err) => {
+          uni.hideLoading();
+          this.checkingUpdate = false;
+          uni.showModal({
+            title: '检查更新失败',
+            content: err.message || '请稍后重试',
+            showCancel: false,
+            confirmText: '知道了',
+            confirmColor: '#0085D0'
+          });
+        });
+      // #endif
+    },
+    handleUpdateResult(result) {
+      const updateType = parseInt(result.update_type, 10);
+      // 0:提示热更 1:强制热更 2:提示整包 3:强制整包
+      const isWgt = updateType === 0 || updateType === 1;
+      const isForce = updateType === 1 || updateType === 3;
+      const downloadUrl = result.download_url || result.url;
+      const updateLog = result.update_log || result.note || '发现新版本，请更新';
+
+      if (!downloadUrl) {
+        uni.showModal({
+          title: '版本更新',
+          content: '已发现新版本，但暂无下载地址，请稍后重试。',
+          showCancel: false,
+          confirmColor: '#0085D0'
+        });
+        return;
+      }
+
+      if (isWgt) {
+        // 热更新：静默或强制
+        this.startWgtUpdate(downloadUrl, updateLog, isForce);
+      } else {
+        // 整包更新：提示或强制
+        this.startApkUpdate(downloadUrl, updateLog, isForce);
+      }
+    },
+    // 热更新流程
+    startWgtUpdate(url, updateLog, isForce) {
+      const doDownload = () => {
+        uni.showLoading({ title: '下载中...', mask: true });
+        const task = uni.downloadFile({
+          url,
+          success: (res) => {
+            uni.hideLoading();
+            if (res.statusCode !== 200) {
+              uni.showToast({ title: '下载失败', icon: 'none' });
+              return;
+            }
+            // #ifdef APP-PLUS
+            plus.runtime.install(
+              res.tempFilePath,
+              { force: false },
+              () => {
+                if (isForce) {
+                  plus.runtime.restart();
+                  return;
+                }
+                uni.showModal({
+                  title: '更新完成',
+                  content: '已准备好新版本，立即重启应用？',
+                  showCancel: true,
+                  confirmText: '立即重启',
+                  confirmColor: '#0085D0',
+                  success: (r) => {
+                    if (r.confirm) {
+                      plus.runtime.restart();
+                    }
+                  }
+                });
+              },
+              (err) => {
+                uni.showModal({
+                  title: '安装失败',
+                  content: (err && err.message) || '请稍后重试',
+                  showCancel: false,
+                  confirmColor: '#0085D0'
+                });
+              }
+            );
+            // #endif
+          },
+          fail: () => {
+            uni.hideLoading();
+            uni.showToast({ title: '下载失败', icon: 'none' });
+          }
+        });
+        task.onProgressUpdate((res) => {
+          uni.showLoading({ title: `下载中 ${res.progress}%`, mask: true });
+        });
+      };
+
+      if (isForce) {
+        // 强制热更：直接静默下载
+        doDownload();
+      } else {
+        uni.showModal({
+          title: '发现新版本',
+          content: updateLog,
+          showCancel: true,
+          confirmText: '立即更新',
+          confirmColor: '#0085D0',
+          success: (r) => {
+            if (r.confirm) {
+              doDownload();
+            }
+          }
+        });
+      }
+    },
+    // 整包更新流程
+    startApkUpdate(url, updateLog, isForce) {
+      // #ifdef APP-PLUS
+      const info = uni.getSystemInfoSync();
+      const isIOS = info.platform === 'ios';
+
+      const doOpenUrl = () => {
+        plus.runtime.openURL(url, () => {
+          uni.showToast({ title: '跳转下载失败', icon: 'none' });
+        });
+      };
+
+      if (isIOS) {
+        // iOS 必须跳转应用商店或下载链接
+        uni.showModal({
+          title: '发现新版本',
+          content: updateLog,
+          showCancel: !isForce,
+          confirmText: '立即跳转',
+          confirmColor: '#0085D0',
+          success: (r) => {
+            if (r.confirm) {
+              doOpenUrl();
+            }
+          }
+        });
+        return;
+      }
+
+      // Android：弹出不可关闭对话框引导跳转下载
+      uni.showModal({
+        title: '发现新版本',
+        content: updateLog + (isForce ? '\n（此版本为强制更新，需下载安装后方可继续使用）' : ''),
+        showCancel: !isForce,
+        confirmText: '立即下载',
+        confirmColor: '#0085D0',
+        success: (r) => {
+          if (r.confirm) {
+            doOpenUrl();
+          }
+        }
+      });
+      // #endif
     },
     handleLogout() {
       uni.showModal({

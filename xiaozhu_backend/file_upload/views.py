@@ -132,7 +132,7 @@ def poll_asr_job(job_id, record_id, headers):
             )
             response.raise_for_status()
             job = response.json()
-            print(job["status"])
+            print(f"[ASR poll] job_id={job_id} poll={poll_count} status={job.get('status')} full={job}")
 
             if job["status"] == "done":
                 requests.delete(

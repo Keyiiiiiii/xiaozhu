@@ -23,6 +23,10 @@ const config = {
     logoutPath: "/api/auth/logout/",
     mePath: "/api/auth/me/",
     refreshPath: "/api/auth/refresh/"
+  },
+  versionServer: {
+    baseUrl: "http://localhost:8000",
+    checkPath: "/api/version/check/"
   }
 };
 
