@@ -2,7 +2,10 @@
   <view class="force-mask" v-if="visible" @touchstart.stop>
     <view class="force-modal" @click.stop>
       <view class="force-header">
-        <view class="force-tag" :class="tagClass">{{ tagText }}</view>
+        <view class="force-tag-row">
+          <view class="force-tag" :class="urgencyClass">{{ urgencyText }}</view>
+          <view class="force-tag force-tag-source" :class="sourceClass">{{ sourceText }}</view>
+        </view>
         <text class="force-title">{{ current.title || '重要通知' }}</text>
       </view>
 
@@ -20,14 +23,15 @@
       </scroll-view>
 
       <view class="force-footer">
-        <view class="force-checkbox-row" @click="toggleConfirmed">
-          <view class="force-checkbox" :class="{ checked: hasConfirmed }">
-            <text v-if="hasConfirmed" class="force-checkbox-icon">✓</text>
-          </view>
-          <text class="force-checkbox-label">我已阅读并知悉</text>
+        <view class="force-countdown-row" v-if="countdownLeft > 0">
+          <text class="force-countdown-text">{{ countdownLeft }} 秒后可关闭</text>
         </view>
-        <view class="force-btn" :class="{ 'force-btn-disabled': !hasConfirmed }" @click="handleConfirm">
-          <text class="force-btn-text">确 认</text>
+        <view
+          class="force-btn"
+          :class="{ 'force-btn-disabled': countdownLeft > 0 }"
+          @click="handleConfirm"
+        >
+          <text class="force-btn-text">{{ countdownLeft > 0 ? (countdownLeft + ' 秒') : '我已知晓' }}</text>
         </view>
       </view>
     </view>
@@ -47,26 +51,53 @@ export default {
       visible: false,
       pendingList: [],
       currentIndex: 0,
-      hasConfirmed: false,
-      isProcessing: false
+      isProcessing: false,
+      // 倒计时剩余秒数；>0 时按钮禁用，==0 时可点击关闭
+      countdownLeft: 0,
+      countdownTimer: null
     };
   },
   computed: {
     current() {
       return this.pendingList[this.currentIndex] || {};
     },
-    tagText() {
-      const tag = this.current.tag || this.current.level;
-      if (tag === 'urgent' || tag === '紧急') return '紧急';
-      if (tag === 'city' || tag === '市级') return '市级';
-      if (tag === 'district' || tag === '区县') return '区县';
-      return '通知';
+    // 当前通知所需倒计时秒数：紧急 10 秒，重要 3 秒
+    // 优先读 urgency 字段；兼容旧 tag/level 字段（urgent 视为紧急）
+    countdownTotal() {
+      const u = this.current.urgency;
+      const fallback = this.current.tag || this.current.level;
+      const value = u || fallback;
+      if (value === 'urgent' || value === '紧急') return 10;
+      return 3;
     },
-    tagClass() {
-      const tag = this.current.tag || this.current.level;
-      if (tag === 'urgent' || tag === '紧急') return 'tag-urgent';
-      if (tag === 'city' || tag === '市级') return 'tag-city';
-      if (tag === 'district' || tag === '区县') return 'tag-district';
+    // 紧急程度文案：重要 / 紧急
+    urgencyText() {
+      const u = this.current.urgency;
+      const fallback = this.current.tag || this.current.level;
+      const value = u || fallback;
+      if (value === 'urgent' || value === '紧急') return '紧急';
+      return '重要';
+    },
+    // 紧急程度样式：紧急红 / 重要蓝
+    urgencyClass() {
+      const u = this.current.urgency;
+      const fallback = this.current.tag || this.current.level;
+      const value = u || fallback;
+      if (value === 'urgent' || value === '紧急') return 'tag-urgent';
+      return 'tag-important';
+    },
+    // 来源文案：市级 / 区县
+    sourceText() {
+      const s = this.current.source || this.current.tag;
+      if (s === 'city' || s === '市级') return '市级';
+      if (s === 'district' || s === '区县') return '区县';
+      return '';
+    },
+    // 来源样式：市级橙 / 区县蓝
+    sourceClass() {
+      const s = this.current.source || this.current.tag;
+      if (s === 'city' || s === '市级') return 'tag-city';
+      if (s === 'district' || s === '区县') return 'tag-district';
       return 'tag-normal';
     }
   },
@@ -78,6 +109,7 @@ export default {
   },
   beforeDestroy() {
     uni.$off(EVENT_CHECK, this.handleCheck);
+    this.clearCountdown();
     // 组件销毁前确保恢复 tabBar，避免遮挡被遗留
     this.restoreTabBar();
   },
@@ -85,8 +117,16 @@ export default {
     visible(val) {
       if (val) {
         this.hideTabBar();
+        this.startCountdown();
       } else {
+        this.clearCountdown();
         this.restoreTabBar();
+      }
+    },
+    // 多条强制通知切换时，重置倒计时
+    currentIndex() {
+      if (this.visible) {
+        this.startCountdown();
       }
     }
   },
@@ -107,6 +147,26 @@ export default {
         console.warn('[force-notification] showTabBar failed:', e);
       }
     },
+    // 启动倒计时：每秒递减，到 0 时清空定时器
+    startCountdown() {
+      this.clearCountdown();
+      this.countdownLeft = this.countdownTotal;
+      if (this.countdownLeft <= 0) return;
+      this.countdownTimer = setInterval(() => {
+        if (this.countdownLeft > 0) {
+          this.countdownLeft -= 1;
+          if (this.countdownLeft === 0) {
+            this.clearCountdown();
+          }
+        }
+      }, 1000);
+    },
+    clearCountdown() {
+      if (this.countdownTimer) {
+        clearInterval(this.countdownTimer);
+        this.countdownTimer = null;
+      }
+    },
     handleCheck() {
       // 未登录不触发
       const token = uni.getStorageSync('token');
@@ -120,7 +180,6 @@ export default {
           if (filtered.length === 0) return;
           this.pendingList = filtered;
           this.currentIndex = 0;
-          this.hasConfirmed = false;
           this.visible = true;
         })
         .catch((err) => {
@@ -130,24 +189,20 @@ export default {
           this.isProcessing = false;
         });
     },
-    toggleConfirmed() {
-      this.hasConfirmed = !this.hasConfirmed;
-    },
     handleConfirm() {
-      if (!this.hasConfirmed) {
-        uni.showToast({ title: '请先勾选已阅读', icon: 'none' });
+      // 倒计时未结束禁止关闭
+      if (this.countdownLeft > 0) {
         return;
       }
       const id = this.current.id;
       const next = () => {
         if (this.currentIndex < this.pendingList.length - 1) {
+          // 切换下一条，watch 会自动重启倒计时
           this.currentIndex += 1;
-          this.hasConfirmed = false;
         } else {
           this.visible = false;
           this.pendingList = [];
           this.currentIndex = 0;
-          this.hasConfirmed = false;
         }
         if (id != null) {
           uni.setStorageSync(STORAGE_LAST_SHOWN, String(id));
@@ -223,7 +278,21 @@ export default {
   margin-bottom: 8px;
   line-height: 1.6;
 }
+.force-tag-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.force-tag-row .force-tag {
+  margin-bottom: 8px;
+  margin-right: 6px;
+}
+.force-tag-source {
+  /* 来源标签视觉弱于紧急程度标签 */
+  opacity: 0.85;
+}
 .tag-urgent { background-color: #FFF1F0; color: #F5222D; }
+.tag-important { background-color: #E6F4FF; color: #0085D0; }
 .tag-city   { background-color: #FFF7E6; color: #FA8C16; }
 .tag-district { background-color: #F0F5FF; color: #0085D0; }
 .tag-normal { background-color: #F5F5F5; color: #666666; }
@@ -289,35 +358,14 @@ export default {
   border-top: 1px solid #F0F0F0;
   background-color: #FFFFFF;
 }
-.force-checkbox-row {
-  display: flex;
-  align-items: center;
-  margin-bottom: 12px;
-}
-.force-checkbox {
-  width: 18px;
-  height: 18px;
-  border: 1px solid #CCCCCC;
-  border-radius: 3px;
-  margin-right: 8px;
+.force-countdown-row {
   display: flex;
   justify-content: center;
-  align-items: center;
-  background-color: #ffffff;
-  flex-shrink: 0;
+  margin-bottom: 8px;
 }
-.force-checkbox.checked {
-  background-color: #0085D0;
-  border-color: #0085D0;
-}
-.force-checkbox-icon {
-  color: #ffffff;
+.force-countdown-text {
   font-size: 12px;
-  line-height: 1;
-}
-.force-checkbox-label {
-  font-size: 13px;
-  color: #666666;
+  color: #999999;
 }
 .force-btn {
   height: 42px;
@@ -347,9 +395,6 @@ export default {
   }
   .force-footer {
     padding: 10px 16px calc(10px + env(safe-area-inset-bottom));
-  }
-  .force-checkbox-row {
-    margin-bottom: 8px;
   }
   .force-btn {
     height: 38px;

@@ -60,17 +60,24 @@
     <!-- 通知公告 (增强层次感) -->
     <view class="section">
       <view class="section-head">
-        <text class="section-title">重要通知</text>
+        <view class="section-title-wrap">
+          <text class="section-title">重要通知</text>
+          <view class="unread-badge" v-if="unreadCount > 0">
+            <text class="unread-badge-text">{{ unreadCount > 99 ? '99+' : unreadCount }}</text>
+          </view>
+        </view>
         <text class="section-more" @click="goToNotificationList">全部 ></text>
       </view>
       <view class="notice-list" v-if="noticeList.length > 0">
         <view
           class="notice-item"
+          :class="{ 'notice-unread': !item.is_read }"
           v-for="item in noticeList"
           :key="item.id"
           @click="goToNotificationDetail(item.id)"
         >
-          <view class="notice-tag" :class="getNoticeTagClass(item)">{{ getNoticeTagText(item) }}</view>
+          <view class="notice-dot" v-if="!item.is_read"></view>
+          <view class="notice-tag" :class="getUrgencyClass(item)">{{ getUrgencyText(item) }}</view>
           <view class="notice-content">{{ item.title }}</view>
           <view class="notice-time">{{ formatNoticeTime(item.publish_time || item.created_at) }}</view>
         </view>
@@ -97,7 +104,8 @@ export default {
   components: { ForceNotification },
   data() {
     return {
-      noticeList: []
+      noticeList: [],
+      unreadCount: 0
     };
   },
   computed: {
@@ -112,8 +120,21 @@ export default {
   },
   onShow() {
     this.fetchNoticeList();
+    this.fetchUnreadCount();
+  },
+  mounted() {
+    // 监听详情页标记已读事件，实时刷新未读数
+    uni.$on('notification:read-updated', this.handleReadUpdated);
+  },
+  beforeDestroy() {
+    uni.$off('notification:read-updated', this.handleReadUpdated);
   },
   methods: {
+    handleReadUpdated() {
+      // 已读状态变化后，刷新未读数与列表
+      this.fetchUnreadCount();
+      this.fetchNoticeList();
+    },
     goToVisit() {
       uni.switchTab({
         url: '/pages/visit/index'
@@ -154,18 +175,25 @@ export default {
           this.noticeList = [];
         });
     },
-    getNoticeTagText(item) {
-      const tag = item.tag || item.level;
-      if (tag === 'urgent' || tag === '紧急') return '紧急';
-      if (tag === 'city' || tag === '市级') return '市级';
-      if (tag === 'district' || tag === '区县') return '区县';
+    fetchUnreadCount() {
+      notificationApi.getUnreadCount()
+        .then((res) => {
+          this.unreadCount = (res && typeof res.count === 'number') ? res.count : 0;
+        })
+        .catch((err) => {
+          console.warn('[workbench] 获取未读数失败:', err && err.message);
+        });
+    },
+    getUrgencyText(item) {
+      const u = item.urgency || item.tag || item.level;
+      if (u === 'urgent' || u === '紧急') return '紧急';
+      if (u === 'important' || u === '重要') return '重要';
       return '通知';
     },
-    getNoticeTagClass(item) {
-      const tag = item.tag || item.level;
-      if (tag === 'urgent' || tag === '紧急') return 'urgent';
-      if (tag === 'city' || tag === '市级') return 'city-level';
-      if (tag === 'district' || tag === '区县') return 'normal';
+    getUrgencyClass(item) {
+      const u = item.urgency || item.tag || item.level;
+      if (u === 'urgent' || u === '紧急') return 'urgent';
+      if (u === 'important' || u === '重要') return 'important';
       return 'normal';
     },
     formatNoticeTime(timeStr) {
@@ -297,6 +325,26 @@ export default {
   font-size: 13px;
   color: #999999;
 }
+.section-title-wrap {
+  display: flex;
+  align-items: center;
+}
+.unread-badge {
+  min-width: 18px;
+  height: 18px;
+  padding: 0 6px;
+  margin-left: 8px;
+  border-radius: 9px;
+  background-color: #F5222D;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+.unread-badge-text {
+  font-size: 11px;
+  color: #FFFFFF;
+  line-height: 1;
+}
 
 /* 快捷操作优化 */
 .grid-panel {
@@ -342,10 +390,38 @@ export default {
   align-items: flex-start;
   padding: 16px 0;
   border-bottom: 1px solid #F5F5F5;
+  position: relative;
 }
 .notice-item:last-child {
   border-bottom: none;
   padding-bottom: 0;
+}
+/* 未读：左侧粗条提示 + 略深背景 */
+.notice-item.notice-unread {
+  background-color: #FAFCFE;
+  margin: 0 -8px;
+  padding-left: 8px;
+  padding-right: 8px;
+  border-radius: 4px;
+}
+.notice-item.notice-unread::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 16px;
+  bottom: 16px;
+  width: 3px;
+  background-color: #0085D0;
+  border-radius: 2px;
+}
+.notice-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background-color: #F5222D;
+  margin-right: 6px;
+  margin-top: 8px;
+  flex-shrink: 0;
 }
 .notice-tag {
   font-size: 11px;
@@ -358,6 +434,10 @@ export default {
 .urgent {
   background-color: #FFF1F0;
   color: #F5222D;
+}
+.important {
+  background-color: #E6F4FF;
+  color: #0085D0;
 }
 .normal {
   background-color: #F0F5FF;

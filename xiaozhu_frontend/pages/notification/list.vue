@@ -9,16 +9,28 @@
       <view class="nav-placeholder"></view>
     </view>
 
-    <!-- 顶部筛选条 (样式与待办 tab-header 保持一致) -->
+    <!-- 顶部筛选条：来源（市级/区县） -->
     <view class="tab-header">
       <view
-        v-for="opt in tagFilters"
+        v-for="opt in sourceFilters"
         :key="opt.value"
         class="tab-item"
-        :class="{ active: currentTag === opt.value }"
-        @click="switchTag(opt.value)"
+        :class="{ active: currentSource === opt.value }"
+        @click="switchSource(opt.value)"
       >
         <text class="tab-text">{{ opt.label }}</text>
+      </view>
+    </view>
+    <!-- 第二行筛选条：紧急程度（全部/重要/紧急） -->
+    <view class="tab-header sub-tab-header">
+      <view
+        v-for="opt in urgencyFilters"
+        :key="opt.value"
+        class="tab-item sub-tab-item"
+        :class="{ active: currentUrgency === opt.value }"
+        @click="switchUrgency(opt.value)"
+      >
+        <text class="tab-text sub-tab-text">{{ opt.label }}</text>
       </view>
     </view>
 
@@ -34,9 +46,20 @@
       :lower-threshold="80"
     >
       <view class="notice-list" v-if="list.length > 0">
-        <view class="notice-card" v-for="item in list" :key="item.id" @click="goDetail(item.id)">
+        <view
+          class="notice-card"
+          :class="{ 'notice-card-unread': !item.is_read }"
+          v-for="item in list"
+          :key="item.id"
+          @click="goDetail(item.id)"
+        >
           <view class="notice-card-head">
-            <view class="notice-tag" :class="getTagClass(item)">{{ getTagText(item) }}</view>
+            <view class="notice-card-head-left">
+              <view class="unread-dot" v-if="!item.is_read"></view>
+              <view class="notice-tag tag-urgency" :class="getUrgencyClass(item)">{{ getUrgencyText(item) }}</view>
+              <view class="notice-tag tag-source" :class="getSourceClass(item)">{{ getSourceText(item) }}</view>
+              <text class="read-mark" v-if="item.is_read">已读</text>
+            </view>
             <text class="notice-time">{{ formatTime(item.publish_time || item.created_at) }}</text>
           </view>
           <view class="notice-title">{{ item.title }}</view>
@@ -83,12 +106,17 @@ const PAGE_SIZE = 10;
 export default {
   data() {
     return {
-      currentTag: 'all',
-      tagFilters: [
+      currentSource: 'all',
+      currentUrgency: 'all',
+      sourceFilters: [
         { value: 'all', label: '全部' },
-        { value: 'urgent', label: '紧急' },
         { value: 'city', label: '市级' },
         { value: 'district', label: '区县' }
+      ],
+      urgencyFilters: [
+        { value: 'all', label: '全部' },
+        { value: 'important', label: '重要' },
+        { value: 'urgent', label: '紧急' }
       ],
       list: [],
       page: 1,
@@ -107,7 +135,30 @@ export default {
   onLoad() {
     this.fetchList(true);
   },
+  mounted() {
+    // 详情页标记已读后，实时刷新本页 is_read 状态
+    uni.$on('notification:read-updated', this.handleReadUpdated);
+  },
+  beforeDestroy() {
+    uni.$off('notification:read-updated', this.handleReadUpdated);
+  },
+  onShow() {
+    // 从详情页返回时，可能已有新的已读标记，重新拉取
+    this.fetchList(true);
+  },
   methods: {
+    handleReadUpdated(e) {
+      const id = e && e.id;
+      if (id == null) {
+        this.fetchList(true);
+        return;
+      }
+      // 本地立即更新 is_read 状态，避免等待网络请求
+      const target = this.list.find((n) => String(n.id) === String(id));
+      if (target) {
+        this.$set(target, 'is_read', true);
+      }
+    },
     goBack() {
       const pages = getCurrentPages();
       if (pages.length > 1) {
@@ -116,9 +167,14 @@ export default {
         uni.switchTab({ url: '/pages/workbench/index' });
       }
     },
-    switchTag(tag) {
-      if (this.currentTag === tag) return;
-      this.currentTag = tag;
+    switchSource(source) {
+      if (this.currentSource === source) return;
+      this.currentSource = source;
+      this.fetchList(true);
+    },
+    switchUrgency(urgency) {
+      if (this.currentUrgency === urgency) return;
+      this.currentUrgency = urgency;
       this.fetchList(true);
     },
     onRefresh() {
@@ -135,7 +191,8 @@ export default {
         this.hasMore = true;
       }
       const params = { page: this.page, page_size: PAGE_SIZE };
-      if (this.currentTag !== 'all') params.tag = this.currentTag;
+      if (this.currentSource !== 'all') params.source = this.currentSource;
+      if (this.currentUrgency !== 'all') params.urgency = this.currentUrgency;
 
       return notificationApi.getList(params)
         .then((res) => {
@@ -171,18 +228,28 @@ export default {
         url: '/pages/notification/publish'
       });
     },
-    getTagText(item) {
-      const tag = item.tag || item.level;
-      if (tag === 'urgent' || tag === '紧急') return '紧急';
-      if (tag === 'city' || tag === '市级') return '市级';
-      if (tag === 'district' || tag === '区县') return '区县';
+    getUrgencyText(item) {
+      const u = item.urgency || item.tag || item.level;
+      if (u === 'urgent' || u === '紧急') return '紧急';
+      if (u === 'important' || u === '重要') return '重要';
       return '通知';
     },
-    getTagClass(item) {
-      const tag = item.tag || item.level;
-      if (tag === 'urgent' || tag === '紧急') return 'tag-urgent';
-      if (tag === 'city' || tag === '市级') return 'tag-city';
-      if (tag === 'district' || tag === '区县') return 'tag-district';
+    getUrgencyClass(item) {
+      const u = item.urgency || item.tag || item.level;
+      if (u === 'urgent' || u === '紧急') return 'tag-urgent';
+      if (u === 'important' || u === '重要') return 'tag-important';
+      return 'tag-normal';
+    },
+    getSourceText(item) {
+      const s = item.source || item.tag;
+      if (s === 'city' || s === '市级') return '市级';
+      if (s === 'district' || s === '区县') return '区县';
+      return '';
+    },
+    getSourceClass(item) {
+      const s = item.source || item.tag;
+      if (s === 'city' || s === '市级') return 'tag-city';
+      if (s === 'district' || s === '区县') return 'tag-district';
       return 'tag-normal';
     },
     stripSummary(content) {
@@ -267,6 +334,25 @@ export default {
   font-size: 15px;
   color: #666666;
 }
+/* 第二行筛选条：紧急程度 */
+.sub-tab-header {
+  border-bottom: none;
+  background-color: #FAFCFE;
+}
+.sub-tab-item {
+  padding: 10px 0;
+}
+.sub-tab-item.active {
+  border-bottom: 2px solid #F5222D;
+}
+.sub-tab-item.active .sub-tab-text {
+  color: #F5222D;
+  font-weight: bold;
+}
+.sub-tab-text {
+  font-size: 13px;
+  color: #888888;
+}
 
 .notice-scroll {
   flex: 1;
@@ -282,12 +368,37 @@ export default {
   margin-bottom: 12px;
   border: 1px solid #eeeeee;
   box-shadow: 0 2px 6px rgba(0, 0, 0, 0.03);
+  position: relative;
+}
+/* 未读卡：左侧蓝色竖条 + 极淡蓝底 */
+.notice-card-unread {
+  border-left: 3px solid #0085D0;
+  background-color: #FAFCFE;
 }
 .notice-card-head {
   display: flex;
   justify-content: space-between;
   align-items: center;
   margin-bottom: 10px;
+}
+.notice-card-head-left {
+  display: flex;
+  align-items: center;
+}
+.unread-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background-color: #F5222D;
+  margin-right: 6px;
+}
+.read-mark {
+  font-size: 11px;
+  color: #999999;
+  margin-left: 6px;
+  background-color: #F5F5F5;
+  padding: 1px 6px;
+  border-radius: 2px;
 }
 .notice-tag {
   font-size: 11px;
@@ -296,9 +407,14 @@ export default {
   line-height: 1.5;
 }
 .tag-urgent { background-color: #fff1f0; color: #f5222d; border: 1px solid #ffa39e; }
+.tag-important { background-color: #e6f4ff; color: #0085d0; border: 1px solid #91d5ff; }
 .tag-city   { background-color: #fff7e6; color: #fa8c16; border: 1px solid #ffd591; }
 .tag-district { background-color: #f0f5ff; color: #0085D0; border: 1px solid #adc6ff; }
 .tag-normal { background-color: #f5f5f5; color: #666666; border: 1px solid #d9d9d9; }
+/* 来源标签视觉弱于紧急程度 */
+.tag-source {
+  opacity: 0.85;
+}
 
 .notice-time {
   font-size: 12px;

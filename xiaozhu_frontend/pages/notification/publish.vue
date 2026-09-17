@@ -12,18 +12,35 @@
       </view>
 
       <view class="form-item">
-        <text class="form-label">通知标签<text class="req">*</text></text>
+        <text class="form-label">来源<text class="req">*</text></text>
         <view class="tag-picker">
           <view
-            v-for="opt in tagOptions"
+            v-for="opt in sourceOptions"
             :key="opt.value"
             class="tag-option"
-            :class="{ active: form.tag === opt.value }"
-            @click="form.tag = opt.value"
+            :class="{ active: form.source === opt.value, disabled: opt.disabled }"
+            @click="selectSource(opt)"
           >
             <text class="tag-option-text">{{ opt.label }}</text>
           </view>
         </view>
+        <text class="form-hint" v-if="role === 'district'">区县专项仅可下发本区县来源通知</text>
+      </view>
+
+      <view class="form-item">
+        <text class="form-label">紧急程度<text class="req">*</text></text>
+        <view class="tag-picker">
+          <view
+            v-for="opt in urgencyOptions"
+            :key="opt.value"
+            class="tag-option"
+            :class="{ active: form.urgency === opt.value }"
+            @click="form.urgency = opt.value"
+          >
+            <text class="tag-option-text">{{ opt.label }}</text>
+          </view>
+        </view>
+        <text class="form-hint">紧急通知用户开屏需倒计时 10 秒，重要通知倒计时 3 秒</text>
       </view>
 
       <view class="form-item">
@@ -80,7 +97,8 @@ export default {
       role: '',
       form: {
         title: '',
-        tag: 'city',
+        source: 'city',
+        urgency: 'important',
         audience: 'frontline',
         force_display: false,
         content: ''
@@ -90,10 +108,25 @@ export default {
   },
   computed: {
     ...mapState(['userInfo']),
-    tagOptions() {
+    sourceOptions() {
+      // city 可选市级 / 区县；district 仅可选本区县
+      if (this.role === 'city') {
+        return [
+          { value: 'city', label: '市级' },
+          { value: 'district', label: '区县' }
+        ];
+      }
+      if (this.role === 'district') {
+        return [
+          { value: 'district', label: '本区县', disabled: false },
+          { value: 'city', label: '市级', disabled: true }
+        ];
+      }
+      return [];
+    },
+    urgencyOptions() {
       return [
-        { value: 'city', label: '市级' },
-        { value: 'district', label: '区县' },
+        { value: 'important', label: '重要' },
         { value: 'urgent', label: '紧急' }
       ];
     },
@@ -124,15 +157,19 @@ export default {
       setTimeout(() => uni.navigateBack(), 800);
       return;
     }
-    // 区县角色默认标签为 district
+    // 区县角色默认来源为 district
     if (this.role === 'district') {
-      this.form.tag = 'district';
+      this.form.source = 'district';
       this.form.audience = 'frontline';
     }
   },
   methods: {
     onForceChange(e) {
       this.form.force_display = e.detail.value;
+    },
+    selectSource(opt) {
+      if (opt.disabled) return;
+      this.form.source = opt.value;
     },
     selectAudience(opt) {
       if (opt.disabled) return;
@@ -141,13 +178,17 @@ export default {
     handleSubmit() {
       if (this.submitting) return;
 
-      const { title, content, tag, audience, force_display } = this.form;
+      const { title, content, source, urgency, audience, force_display } = this.form;
       if (!title.trim()) {
         uni.showToast({ title: '请输入标题', icon: 'none' });
         return;
       }
-      if (!tag) {
-        uni.showToast({ title: '请选择标签', icon: 'none' });
+      if (!source) {
+        uni.showToast({ title: '请选择来源', icon: 'none' });
+        return;
+      }
+      if (!urgency) {
+        uni.showToast({ title: '请选择紧急程度', icon: 'none' });
         return;
       }
       if (!audience) {
@@ -163,7 +204,10 @@ export default {
       notificationApi.publish({
         title: title.trim(),
         content: content.trim(),
-        tag,
+        source,
+        urgency,
+        // 兼容旧字段：tag = source
+        tag: source,
         audience,
         force_display: !!force_display
       })
