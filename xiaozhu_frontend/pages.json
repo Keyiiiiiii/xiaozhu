@@ -16,7 +16,10 @@
 		{
 			"path": "pages/knowledge/index",
 			"style": {
-				"navigationBarTitleText": "知识库"
+				"navigationBarTitleText": "知识库",
+				"app-plus": {
+					"softinput": "adjustResize"
+				}
 			}
 		},
 		{
