@@ -342,44 +342,12 @@ export default {
       // #endif
 
       // #ifdef APP-PLUS
-      if (typeof plus !== 'undefined' && plus.io) {
-        plus.io.chooseFile({
-          filter: ['m4a', 'mp3', 'wav', 'ogg', 'flac'],
-          multiple: false,
-          success: (res) => {
-            if (res.files && res.files.length > 0) {
-              const file = res.files[0];
-              this.processUploadFile(file, file.split('/').pop(), 0);
-            }
-          },
-          fail: (err) => {
-            console.warn("选择文件失败:", err);
-            uni.showToast({
-              title: "选择文件失败",
-              icon: "none"
-            });
-          }
-        });
-      } else {
-        uni.chooseMessageFile({
-          count: 1,
-          type: 'file',
-          extension: ['m4a', 'mp3', 'wav', 'ogg', 'flac'],
-          success: (res) => {
-            const file = res.tempFiles[0];
-            this.processUploadFile(file.path, file.name, file.size);
-          },
-          fail: (err) => {
-            console.warn("选择文件失败:", err);
-            if (err.errMsg && err.errMsg.indexOf('cancel') === -1) {
-              uni.showToast({
-                title: "选择文件失败",
-                icon: "none"
-              });
-            }
-          }
-        });
+      const platform = uni.getSystemInfoSync().platform;
+      if (platform === 'android') {
+        this.chooseAudioFileAndroid();
+        return;
       }
+      this.chooseAudioFilePlusIo();
       // #endif
 
       // #ifdef MP-WEIXIN
@@ -403,6 +371,269 @@ export default {
       });
       // #endif
     },
+
+    // #ifdef APP-PLUS
+    chooseAudioFilePlusIo() {
+      if (typeof plus === 'undefined' || !plus.io || typeof plus.io.chooseFile !== 'function') {
+        uni.showToast({
+          title: "当前环境不支持选择文件",
+          icon: "none"
+        });
+        return;
+      }
+      plus.io.chooseFile({
+        title: "选择录音文件",
+        filter: ".m4a,.mp3,.wav,.ogg,.flac,audio/*",
+        multiple: false,
+        success: (res) => {
+          console.log("选择文件成功:", res);
+          this.handleChosenAudioResult(res);
+        },
+        fail: (err) => {
+          console.warn("选择文件失败:", err);
+          const msg = (err && (err.message || err.errMsg)) || "";
+          if (msg.indexOf("cancel") === -1 && msg.indexOf("取消") === -1) {
+            uni.showToast({
+              title: "选择文件失败",
+              icon: "none"
+            });
+          }
+        }
+      });
+    },
+
+    chooseAudioFileAndroid() {
+      try {
+        const CHOOSER_REQUEST_CODE = 10086;
+        const main = plus.android.runtimeMainActivity();
+        const Intent = plus.android.importClass("android.content.Intent");
+        const Activity = plus.android.importClass("android.app.Activity");
+        const intent = new Intent(Intent.ACTION_GET_CONTENT);
+        intent.addCategory(Intent.CATEGORY_OPENABLE);
+        intent.setType("audio/*");
+        intent.putExtra(Intent.EXTRA_LOCAL_ONLY, true);
+
+        const previousHandler = main.onActivityResult;
+        const self = this;
+        main.onActivityResult = function(requestCode, resultCode, data) {
+          if (requestCode !== CHOOSER_REQUEST_CODE) {
+            if (typeof previousHandler === "function") {
+              try {
+                previousHandler.call(main, requestCode, resultCode, data);
+              } catch (e) {
+                console.warn("转发 onActivityResult 失败:", e);
+              }
+            }
+            return;
+          }
+          main.onActivityResult = previousHandler;
+          if (resultCode !== Activity.RESULT_OK || !data) {
+            return;
+          }
+          try {
+            plus.android.importClass(data);
+            const uri = data.getData();
+            if (!uri) {
+              uni.showToast({
+                title: "未获取到文件",
+                icon: "none"
+              });
+              return;
+            }
+            plus.android.importClass(uri);
+            self.copyAndroidUriToLocal(uri)
+              .then((copied) => {
+                self.processUploadFile(copied.path, copied.name, copied.size || 0);
+              })
+              .catch((copyErr) => {
+                console.error("读取安卓所选文件失败:", copyErr);
+                uni.showToast({
+                  title: copyErr.message || "读取文件失败",
+                  icon: "none"
+                });
+              });
+          } catch (err) {
+            console.error("处理安卓选文件结果失败:", err);
+            uni.showToast({
+              title: "读取文件失败",
+              icon: "none"
+            });
+          }
+        };
+
+        main.startActivityForResult(Intent.createChooser(intent, "选择录音文件"), CHOOSER_REQUEST_CODE);
+      } catch (e) {
+        console.error("打开安卓文件选择器失败:", e);
+        this.chooseAudioFilePlusIo();
+      }
+    },
+
+    copyAndroidUriToLocal(uri) {
+      return new Promise((resolve, reject) => {
+        try {
+          const main = plus.android.runtimeMainActivity();
+          const resolver = main.getContentResolver();
+          plus.android.importClass(resolver);
+
+          let fileName = "record_" + Date.now() + ".m4a";
+          try {
+            const OpenableColumns = plus.android.importClass("android.provider.OpenableColumns");
+            const cursor = resolver.query(uri, null, null, null, null);
+            if (cursor) {
+              plus.android.importClass(cursor);
+              if (cursor.moveToFirst()) {
+                const nameIdx = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME);
+                if (nameIdx >= 0) {
+                  const displayName = cursor.getString(nameIdx);
+                  if (displayName) {
+                    fileName = displayName;
+                  }
+                }
+              }
+              cursor.close();
+            }
+          } catch (e) {
+            console.warn("读取文件名失败:", e);
+          }
+
+          fileName = String(fileName).replace(/[\\/:*?"<>|]/g, "_");
+          if (!/\.(m4a|mp3|wav|ogg|flac|aac|amr|3gp)$/i.test(fileName)) {
+            fileName += ".m4a";
+          }
+
+          const inputStream = resolver.openInputStream(uri);
+          if (!inputStream) {
+            reject(new Error("无法读取所选文件"));
+            return;
+          }
+          plus.android.importClass(inputStream);
+
+          const File = plus.android.importClass("java.io.File");
+          const FileOutputStream = plus.android.importClass("java.io.FileOutputStream");
+          const dirPath = main.getExternalFilesDir(null).getAbsolutePath() + "/upload_audio";
+          const dir = new File(dirPath);
+          if (!dir.exists()) {
+            dir.mkdirs();
+          }
+          const destPath = dirPath + "/" + fileName;
+          const fos = new FileOutputStream(destPath);
+
+          let copied = false;
+          try {
+            const Build = plus.android.importClass("android.os.Build");
+            if (Build.VERSION.SDK_INT >= 29) {
+              const FileUtils = plus.android.importClass("android.os.FileUtils");
+              FileUtils.copy(inputStream, fos);
+              copied = true;
+            }
+          } catch (e) {
+            console.warn("FileUtils.copy 不可用，改用缓冲拷贝:", e);
+          }
+
+          if (!copied) {
+            const JArray = plus.android.importClass("java.lang.reflect.Array");
+            const Byte = plus.android.importClass("java.lang.Byte");
+            const buffer = JArray.newInstance(Byte.TYPE, 8192);
+            let len = 0;
+            while ((len = inputStream.read(buffer)) > 0) {
+              fos.write(buffer, 0, len);
+            }
+          }
+
+          fos.flush();
+          fos.close();
+          inputStream.close();
+
+          const destFile = new File(destPath);
+          resolve({
+            path: destPath,
+            name: fileName,
+            size: destFile.length()
+          });
+        } catch (e) {
+          reject(e instanceof Error ? e : new Error("复制文件失败"));
+        }
+      });
+    },
+
+    handleChosenAudioResult(res) {
+      const chosen = this.normalizeChosenFile(res);
+      if (!chosen || !chosen.path) {
+        uni.showToast({
+          title: "未获取到文件",
+          icon: "none"
+        });
+        return;
+      }
+      const path = chosen.path;
+      if (typeof path === "string" && path.indexOf("content://") === 0) {
+        try {
+          const Uri = plus.android.importClass("android.net.Uri");
+          this.copyAndroidUriToLocal(Uri.parse(path))
+            .then((copied) => {
+              this.processUploadFile(copied.path, copied.name || chosen.name, copied.size || chosen.size);
+            })
+            .catch((err) => {
+              console.error("转换 content URI 失败:", err);
+              uni.showToast({
+                title: err.message || "读取文件失败",
+                icon: "none"
+              });
+            });
+        } catch (e) {
+          this.processUploadFile(path, chosen.name, chosen.size);
+        }
+        return;
+      }
+      this.processUploadFile(path, chosen.name, chosen.size);
+    },
+
+    normalizeChosenFile(res) {
+      if (!res) {
+        return null;
+      }
+      if (res.tempFiles && res.tempFiles.length > 0) {
+        const file = res.tempFiles[0];
+        const path = file.path || file.tempFilePath || "";
+        return {
+          path,
+          name: file.name || this.fileNameFromPath(path),
+          size: file.size || 0
+        };
+      }
+      if (Array.isArray(res.files) && res.files.length > 0) {
+        const file = res.files[0];
+        if (typeof file === "string") {
+          return { path: file, name: this.fileNameFromPath(file), size: 0 };
+        }
+        const path = file.path || file.fullPath || file.filePath || "";
+        return {
+          path,
+          name: file.name || this.fileNameFromPath(path),
+          size: file.size || 0
+        };
+      }
+      if (typeof res.files === "string") {
+        return { path: res.files, name: this.fileNameFromPath(res.files), size: 0 };
+      }
+      if (typeof res.file === "string") {
+        return { path: res.file, name: this.fileNameFromPath(res.file), size: 0 };
+      }
+      if (typeof res === "string") {
+        return { path: res, name: this.fileNameFromPath(res), size: 0 };
+      }
+      return null;
+    },
+
+    fileNameFromPath(filePath) {
+      if (!filePath || typeof filePath !== "string") {
+        return "record.m4a";
+      }
+      const clean = filePath.split("?")[0];
+      const parts = clean.split("/");
+      return parts[parts.length - 1] || "record.m4a";
+    },
+    // #endif
 
     async processUploadFile(filePath, fileName, fileSize, fileObject) {
       if (!filePath) {
@@ -452,28 +683,124 @@ export default {
 
     getAudioDuration(filePath) {
       return new Promise((resolve) => {
+        let settled = false;
+        const done = (value) => {
+          if (settled) return;
+          settled = true;
+          const seconds = Number(value);
+          resolve(!isFinite(seconds) || seconds < 0 ? 0 : Math.round(seconds));
+        };
+
         // #ifdef H5
         const audio = new Audio(filePath);
         audio.addEventListener('loadedmetadata', () => {
-          resolve(audio.duration || 0);
+          done(audio.duration || 0);
         });
         audio.addEventListener('error', () => {
-          resolve(0);
+          done(0);
         });
         audio.src = filePath;
+        setTimeout(() => done(0), 3000);
+        return;
+        // #endif
+
+        // #ifdef APP-PLUS
+        try {
+          const nativeDuration = this.getNativeAudioDuration(filePath);
+          if (nativeDuration > 0) {
+            done(nativeDuration);
+            return;
+          }
+        } catch (e) {
+          console.warn("原生读取音频时长失败:", e);
+        }
+        this.getInnerAudioDuration(filePath).then(done);
+        return;
         // #endif
 
         // #ifndef H5
-        uni.getFileInfo({
-          filePath: filePath,
-          success: () => {
-            resolve(0);
-          },
-          fail: () => {
-            resolve(0);
-          }
-        });
+        this.getInnerAudioDuration(filePath).then(done);
         // #endif
+      });
+    },
+
+    getNativeAudioDuration(filePath) {
+      // #ifdef APP-PLUS
+      if (!filePath) {
+        return 0;
+      }
+      const platform = uni.getSystemInfoSync().platform;
+      if (platform === 'android') {
+        let path = String(filePath);
+        if (path.indexOf('file://') === 0) {
+          path = path.slice(7);
+        }
+        const MediaMetadataRetriever = plus.android.importClass("android.media.MediaMetadataRetriever");
+        const retriever = new MediaMetadataRetriever();
+        try {
+          retriever.setDataSource(path);
+          const durationMs = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION);
+          const seconds = parseInt(durationMs, 10) / 1000;
+          return isFinite(seconds) && seconds > 0 ? seconds : 0;
+        } finally {
+          try {
+            retriever.release();
+          } catch (e) {}
+        }
+      }
+      // #endif
+      return 0;
+    },
+
+    getInnerAudioDuration(filePath) {
+      return new Promise((resolve) => {
+        let settled = false;
+        let ctx = null;
+        let pollTimer = null;
+        const finish = (value) => {
+          if (settled) return;
+          settled = true;
+          if (pollTimer) {
+            clearInterval(pollTimer);
+            pollTimer = null;
+          }
+          try {
+            if (ctx) {
+              ctx.stop();
+              ctx.destroy();
+            }
+          } catch (e) {}
+          const seconds = Number(value);
+          resolve(!isFinite(seconds) || seconds < 0 ? 0 : seconds);
+        };
+
+        try {
+          ctx = uni.createInnerAudioContext();
+          ctx.autoplay = false;
+          ctx.volume = 0;
+          ctx.src = filePath;
+          ctx.onCanplay(() => {
+            try {
+              ctx.pause();
+            } catch (e) {}
+            let tries = 0;
+            pollTimer = setInterval(() => {
+              const duration = ctx && ctx.duration;
+              tries += 1;
+              if ((duration && isFinite(duration) && duration > 0) || tries >= 25) {
+                finish(duration);
+              }
+            }, 80);
+          });
+          ctx.onError(() => finish(0));
+          try {
+            ctx.play();
+          } catch (e) {}
+          setTimeout(() => finish(ctx && ctx.duration), 3000);
+        } catch (e) {
+          console.warn("读取音频时长失败:", e);
+          finish(0);
+        }
       });
     },
     
