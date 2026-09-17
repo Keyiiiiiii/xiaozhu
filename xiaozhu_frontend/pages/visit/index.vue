@@ -1308,7 +1308,7 @@ export default {
           duration: 600000,
           sampleRate: 16000,
           numberOfChannels: 1,
-          format: 'wav',
+          format: 'm4a',
           frameSize: 4
           // 注意：encodeBitRate 仅对 aac/mp3 等压缩格式有效，wav 格式不应设置
         });
@@ -1351,7 +1351,7 @@ export default {
       
       try {
         const fs = uni.getFileSystemManager();
-        const fileName = `record_${Date.now()}.wav`;
+        const fileName = `record_${Date.now()}.m4a`;
         const savedPath = `${uni.env.USER_DATA_PATH}/${fileName}`;
         
         fs.saveFile({
