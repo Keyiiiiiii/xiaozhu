@@ -1614,7 +1614,11 @@ export default {
         this.saveHistoryToStorage();
       }
 
-      showNotification("转写完成", `${recordName} 的语音转写已完成`);
+      showNotification("转写完成", `${recordName} 的语音转写已完成`, {
+        targetType: recordId ? "visitDetail" : "visit",
+        targetId: recordId || localRecordId || null,
+        payload: { jobId, recordId, localRecordId }
+      });
       this.cleanupAsrWebSocket(jobId);
     },
 
@@ -1640,7 +1644,11 @@ export default {
       }
 
       this.saveHistoryToStorage();
-      showNotification("转写失败", `${recordName} 的语音转写失败: ${errorMessage || "未知错误"}`);
+      showNotification("转写失败", `${recordName} 的语音转写失败: ${errorMessage || "未知错误"}`, {
+        targetType: recordId ? "visitDetail" : "visit",
+        targetId: recordId || localRecordId || null,
+        payload: { jobId, recordId, localRecordId, errorMessage }
+      });
       this.cleanupAsrWebSocket(jobId);
     },
 
