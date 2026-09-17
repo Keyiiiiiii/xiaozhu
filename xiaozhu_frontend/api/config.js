@@ -14,7 +14,7 @@ const config = {
     getAudioFilePath: "/api/file/get-audio-file/",
     updateOriginalTextPath: "/api/file/update-original-text/",
     deleteRecordPath: "/api/file/delete-record/",
-    wsBaseUrl: "ws://101.33.219.170:20003/",
+    wsBaseUrl: "ws://101.33.219.170:20001/",
     wsPath: "/ws/asr/"
   },
   authServer: {
