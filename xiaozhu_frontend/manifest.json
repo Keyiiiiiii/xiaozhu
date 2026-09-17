@@ -2,7 +2,7 @@
     "name" : "榕小助",
     "appid" : "__UNI__6F86FEA",
     "description" : "走访程序",
-    "versionName" : "0.1.0",
+    "versionName" : "0.1.1",
     "versionCode" : "100",
     "transformPx" : false,
     "app-plus" : {
@@ -63,8 +63,7 @@
             },
             "ios" : {
                 "UIBackgroundModes" : [ "audio" ],
-                "urlschemewhitelist" : [ "baidumap", "iosamap" ],
-                "dSYMs" : false
+                "urlschemewhitelist" : [ "baidumap", "iosamap" ]
             },
             "sdkConfigs" : {
                 "speech" : {
