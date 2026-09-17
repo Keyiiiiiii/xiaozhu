@@ -121,6 +121,9 @@ def upload_file(request):
 def poll_asr_job(job_id, record_id, headers):
     max_poll_count = 120
     poll_count = 0
+    poll_flag = "none"
+    job = None
+    error_msg = ""
 
     try:
         while poll_count < max_poll_count:
@@ -145,53 +148,20 @@ def poll_asr_job(job_id, record_id, headers):
                 visit_record.original_text = job
                 visit_record.status = "success"
                 visit_record.save()
-
-                channel_layer = get_channel_layer()
-                async_to_sync(channel_layer.group_send)(
-                    f"asr_{job_id}",
-                    {
-                        "type": "asr_result",
-                        "message": {
-                            "status": "success",
-                            "data": job
-                        }
-                    }
-                )
+                poll_flag = "success"
                 break
 
             if job["status"] == "failed":
                 visit_record = VisitRecord.objects.get(id=record_id)
                 visit_record.status = "failed"
                 visit_record.save()
-
-                channel_layer = get_channel_layer()
-                async_to_sync(channel_layer.group_send)(
-                    f"asr_{job_id}",
-                    {
-                        "type": "asr_result",
-                        "message": {
-                            "status": "error",
-                            "message": f"转写失败: {job}"
-                        }
-                    }
-                )
+                poll_flag = "failed"
                 break
         else:
             visit_record = VisitRecord.objects.get(id=record_id)
             visit_record.status = "failed"
             visit_record.save()
-
-            channel_layer = get_channel_layer()
-            async_to_sync(channel_layer.group_send)(
-                f"asr_{job_id}",
-                {
-                    "type": "asr_result",
-                    "message": {
-                        "status": "error",
-                        "message": f"转写超时: 超过 {max_poll_count * 5} 秒"
-                    }
-                }
-            )
+            poll_flag = "timeout"
     except Exception as e:
         try:
             visit_record = VisitRecord.objects.get(id=record_id)
@@ -199,16 +169,42 @@ def poll_asr_job(job_id, record_id, headers):
             visit_record.save()
         except VisitRecord.DoesNotExist:
             pass
+        poll_flag = "exception"
+        error_msg = str(e)
 
+    # 消息推送独立 try，与 while 区分开
+    try:
         channel_layer = get_channel_layer()
+        if poll_flag == "success":
+            message = {
+                "status": "success",
+                "data": job
+            }
+        elif poll_flag == "failed":
+            message = {
+                "status": "error",
+                "message": f"转写失败: {job}"
+            }
+        elif poll_flag == "timeout":
+            message = {
+                "status": "error",
+                "message": f"转写超时: 超过 {max_poll_count * 5} 秒"
+            }
+        elif poll_flag == "exception":
+            message = {
+                "status": "error",
+                "message": f"调用语音转文字API失败: {error_msg}"
+            }
+        else:
+            message = {
+                "status": "error",
+                "message": "未知状态"
+            }
         async_to_sync(channel_layer.group_send)(
             f"asr_{job_id}",
             {
                 "type": "asr_result",
-                "message": {
-                    "status": "error",
-                    "message": f"调用语音转文字API失败: {str(e)}"
-                }
+                "message": message
             }
         )
     finally:
