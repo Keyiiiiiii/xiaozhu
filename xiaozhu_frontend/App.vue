@@ -17,7 +17,7 @@
 			console.log(
 				`%c hello uniapp %c v${version} `,
 				'background:#35495e ; padding: 1px; border-radius: 3px 0 0 3px;  color: #fff',
-				'background:#007aff ;padding: 1px; border-radius: 0 3px 3px 0;  color: #fff; font-weight: bold;'
+				'background:#007aff ;padding: 1px; border-radius: 0 3px 3px 0; color: #fff; font-weight: bold;'
 			)
 			// #endif
 			// 线上示例使用
@@ -31,6 +31,8 @@
 						uni.setStorageSync('userInfo', userInfo);
 						this.setUserInfo(userInfo);
 						this.login('storage');
+						// 启动后检查开屏强制通知
+						uni.$emit('app:check-force-notification');
 					})
 					.catch(() => {
 						clearAuthStorage();
@@ -62,6 +64,8 @@
 		},
 		onShow: function() {
 			console.log('App Show')
+			// 从后台切回前台时检查开屏强制通知
+			uni.$emit('app:check-force-notification');
 		},
 		onHide: function() {
 			console.log('App Hide')

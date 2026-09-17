@@ -51,6 +51,24 @@
 				"navigationBarTitleText": "通知与提醒设置",
 				"navigationStyle": "custom"
 			}
+		},
+		{
+			"path": "pages/notification/list",
+			"style": {
+				"navigationBarTitleText": "通知列表"
+			}
+		},
+		{
+			"path": "pages/notification/detail",
+			"style": {
+				"navigationBarTitleText": "通知详情"
+			}
+		},
+		{
+			"path": "pages/notification/publish",
+			"style": {
+				"navigationBarTitleText": "下发通知"
+			}
 		}
 	],
 	"globalStyle": {

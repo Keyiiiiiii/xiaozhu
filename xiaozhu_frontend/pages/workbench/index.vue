@@ -61,36 +61,57 @@
     <view class="section">
       <view class="section-head">
         <text class="section-title">重要通知</text>
-        <text class="section-more">全部 ></text>
+        <text class="section-more" @click="goToNotificationList">全部 ></text>
       </view>
-      <view class="notice-list">
-        <view class="notice-item">
-          <view class="notice-tag urgent">紧急</view>
-          <view class="notice-content">关于下发2026年6月政企宽带最新营销方案的通知</view>
-          <view class="notice-time">06-01</view>
+      <view class="notice-list" v-if="noticeList.length > 0">
+        <view
+          class="notice-item"
+          v-for="item in noticeList"
+          :key="item.id"
+          @click="goToNotificationDetail(item.id)"
+        >
+          <view class="notice-tag" :class="getNoticeTagClass(item)">{{ getNoticeTagText(item) }}</view>
+          <view class="notice-content">{{ item.title }}</view>
+          <view class="notice-time">{{ formatNoticeTime(item.publish_time || item.created_at) }}</view>
         </view>
-        <view class="notice-item">
-          <view class="notice-tag normal">市级</view>
-          <view class="notice-content">关于规范走访录音上传要求的说明</view>
-          <view class="notice-time">05-28</view>
-        </view>
+      </view>
+      <view class="notice-empty" v-else>
+        <text class="notice-empty-text">暂无通知</text>
+      </view>
+      <view class="notice-publish-entry" v-if="canPublish" @click="goToPublish">
+        <text class="publish-entry-text">+ 下发通知</text>
       </view>
     </view>
+
+    <!-- 开屏强制通知弹窗 -->
+    <force-notification></force-notification>
   </view>
 </template>
 
 <script>
 import { mapState } from 'vuex';
+import notificationApi from '@/api/notification.js';
+import ForceNotification from '@/components/force-notification/force-notification.vue';
 
 export default {
+  components: { ForceNotification },
   data() {
-    return {};
+    return {
+      noticeList: []
+    };
   },
   computed: {
     ...mapState(['userInfo']),
     userName() {
       return this.userInfo ? this.userInfo.name : '用户';
+    },
+    canPublish() {
+      const role = this.userInfo && this.userInfo.role;
+      return role === 'city' || role === 'district';
     }
+  },
+  onShow() {
+    this.fetchNoticeList();
   },
   methods: {
     goToVisit() {
@@ -107,6 +128,52 @@ export default {
       uni.switchTab({
         url: '/pages/todo/index'
       });
+    },
+    goToNotificationList() {
+      uni.navigateTo({
+        url: '/pages/notification/list'
+      });
+    },
+    goToNotificationDetail(id) {
+      uni.navigateTo({
+        url: `/pages/notification/detail?id=${id}`
+      });
+    },
+    goToPublish() {
+      uni.navigateTo({
+        url: '/pages/notification/publish'
+      });
+    },
+    fetchNoticeList() {
+      notificationApi.getList({ page: 1, page_size: 5 })
+        .then((res) => {
+          this.noticeList = res.results || [];
+        })
+        .catch((err) => {
+          console.warn('[workbench] 加载通知失败:', err && err.message);
+          this.noticeList = [];
+        });
+    },
+    getNoticeTagText(item) {
+      const tag = item.tag || item.level;
+      if (tag === 'urgent' || tag === '紧急') return '紧急';
+      if (tag === 'city' || tag === '市级') return '市级';
+      if (tag === 'district' || tag === '区县') return '区县';
+      return '通知';
+    },
+    getNoticeTagClass(item) {
+      const tag = item.tag || item.level;
+      if (tag === 'urgent' || tag === '紧急') return 'urgent';
+      if (tag === 'city' || tag === '市级') return 'city-level';
+      if (tag === 'district' || tag === '区县') return 'normal';
+      return 'normal';
+    },
+    formatNoticeTime(timeStr) {
+      if (!timeStr) return '';
+      const d = new Date(String(timeStr).replace(' ', 'T'));
+      if (isNaN(d.getTime())) return String(timeStr).slice(5, 10) || '';
+      const pad = (n) => (n < 10 ? '0' + n : '' + n);
+      return `${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
     }
   }
 };
@@ -296,6 +363,10 @@ export default {
   background-color: #F0F5FF;
   color: #0085D0;
 }
+.city-level {
+  background-color: #FFF7E6;
+  color: #FA8C16;
+}
 .notice-content {
   flex: 1;
   font-size: 15px;
@@ -308,5 +379,24 @@ export default {
   color: #AAAAAA;
   white-space: nowrap;
   margin-top: 2px;
+}
+.notice-empty {
+  padding: 24px 0;
+  text-align: center;
+}
+.notice-empty-text {
+  font-size: 13px;
+  color: #AAAAAA;
+}
+.notice-publish-entry {
+  margin-top: 16px;
+  padding: 10px 0;
+  text-align: center;
+  border-top: 1px dashed #EEEEEE;
+}
+.publish-entry-text {
+  font-size: 14px;
+  color: #0085D0;
+  font-weight: 500;
 }
 </style>
