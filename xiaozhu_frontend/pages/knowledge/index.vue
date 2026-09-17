@@ -25,9 +25,13 @@
             ></rich-text>
             <text v-else class="msg-text">{{ msg.content }}</text>
             <view v-if="msg.role === 'ai' && msg.showActions" class="msg-actions">
-              <text class="action-link" @click="showSourceFiles(msg)">查看源文件</text>
+              <text 
+                class="action-link" 
+                :class="{ 'action-link-disabled': !msg.file_records || msg.file_records.length === 0 }"
+                @click="showSourceFiles(msg)"
+              >查看源文件</text>
               <text class="action-divider">|</text>
-              <text class="action-link" @click="reportIssue(msg)">问题上报</text>
+              <text class="action-link">问题上报</text>
             </view>
           </view>
           <view v-if="msg.role === 'user'" class="avatar user-avatar">我</view>
@@ -87,49 +91,11 @@
         </scroll-view>
       </view>
     </view>
-
-    <!-- 问题上报弹窗 -->
-    <view v-if="showReportModal" class="modal-overlay" @click="closeReportModal">
-      <view class="modal-content report-modal" @click.stop>
-        <view class="modal-header">
-          <text class="modal-title">问题上报</text>
-          <text class="modal-close" @click="closeReportModal">×</text>
-        </view>
-        <view class="report-body">
-          <view class="report-row">
-            <text class="report-label">您的问题</text>
-            <text class="report-question">{{ reportingMsg.content || '—' }}</text>
-          </view>
-          <view class="report-row">
-            <text class="report-label">智能体回答</text>
-            <scroll-view class="report-answer" scroll-y>
-              <text>{{ reportingMsg.content || '—' }}</text>
-            </scroll-view>
-          </view>
-          <view class="report-row">
-            <text class="report-label">没解决的原因</text>
-            <textarea 
-              class="report-input" 
-              placeholder="请描述您认为回答不准确/不完整的地方..."
-              v-model="reportReason"
-              maxlength="500"
-            />
-          </view>
-        </view>
-        <view class="report-footer">
-          <view class="report-btn report-btn-cancel" @click="closeReportModal">取消</view>
-          <view class="report-btn report-btn-submit" @click="submitReport" :class="{ 'report-btn-disabled': submittingReport }">
-            {{ submittingReport ? '提交中...' : '提交上报' }}
-          </view>
-        </view>
-      </view>
-    </view>
   </view>
 </template>
 
 <script setup>
 import { ref, watch, nextTick, onMounted } from 'vue'
-import { createTicket } from '@/api/ticket.js'
 
 const messages = ref([
   {
@@ -138,7 +104,6 @@ const messages = ref([
     showActions: false,
     source_files: [],
     file_records: [],
-    userQuestion: '',
     timestamp: Date.now()
   }
 ])
@@ -149,10 +114,6 @@ const scrollToId = ref('')
 const pageHeight = ref(0)
 const showFileModal = ref(false)
 const currentFiles = ref([])
-const showReportModal = ref(false)
-const reportingMsg = ref({})
-const reportReason = ref('')
-const submittingReport = ref(false)
 
 onMounted(() => {
   const systemInfo = uni.getSystemInfoSync()
@@ -297,7 +258,6 @@ function onSend() {
         showActions: true,
         source_files: sourceFiles,
         file_records: fileRecords,
-        userQuestion: text,
         timestamp: Date.now()
       })
     },
@@ -325,42 +285,6 @@ function showSourceFiles(msg) {
 function closeFileModal() {
   showFileModal.value = false
   currentFiles.value = []
-}
-
-function reportIssue(msg) {
-  reportingMsg.value = msg
-  reportReason.value = ''
-  showReportModal.value = true
-}
-
-function closeReportModal() {
-  showReportModal.value = false
-  reportingMsg.value = {}
-  reportReason.value = ''
-}
-
-function submitReport() {
-  if (submittingReport.value) return
-
-  const question = reportingMsg.value.userQuestion || ''
-  if (!question) {
-    uni.showToast({ title: '无法获取您的问题', icon: 'none' })
-    return
-  }
-
-  submittingReport.value = true
-  createTicket({
-    question,
-    agent_answer: reportingMsg.value.content || '',
-    reason: reportReason.value.trim()
-  }).then(res => {
-    submittingReport.value = false
-    closeReportModal()
-    uni.showToast({ title: '上报成功，产品经理会尽快处理', icon: 'success', duration: 2500 })
-  }).catch(err => {
-    submittingReport.value = false
-    uni.showToast({ title: err.message || '上报失败，请重试', icon: 'none' })
-  })
 }
 
 function openFile(file) {
@@ -865,73 +789,5 @@ function markdownToHtml(text) {
   padding: 40px 16px;
   color: #999999;
   font-size: 14px;
-}
-
-/* 问题上报弹窗 */
-.report-modal {
-  max-width: 400px;
-}
-.report-body {
-  padding: 16px;
-}
-.report-row {
-  margin-bottom: 16px;
-}
-.report-label {
-  font-size: 13px;
-  color: #999999;
-  margin-bottom: 6px;
-  display: block;
-}
-.report-question {
-  font-size: 14px;
-  color: #333333;
-  background-color: #f5f6f8;
-  padding: 10px 12px;
-  border-radius: 6px;
-  display: block;
-}
-.report-answer {
-  max-height: 120px;
-  background-color: #f5f6f8;
-  padding: 10px 12px;
-  border-radius: 6px;
-  font-size: 14px;
-  color: #666666;
-  line-height: 1.5;
-}
-.report-input {
-  width: 100%;
-  min-height: 80px;
-  background-color: #f5f6f8;
-  padding: 10px 12px;
-  border-radius: 6px;
-  font-size: 14px;
-  color: #333333;
-  box-sizing: border-box;
-}
-.report-footer {
-  display: flex;
-  padding: 12px 16px;
-  border-top: 1px solid #eeeeee;
-  gap: 12px;
-}
-.report-btn {
-  flex: 1;
-  text-align: center;
-  padding: 10px 0;
-  border-radius: 18px;
-  font-size: 14px;
-}
-.report-btn-cancel {
-  background-color: #f5f6f8;
-  color: #666666;
-}
-.report-btn-submit {
-  background: linear-gradient(135deg, #0085D0 0%, #006BB3 100%);
-  color: #ffffff;
-}
-.report-btn-disabled {
-  opacity: 0.6;
 }
 </style>
