@@ -9,6 +9,7 @@
       scroll-y 
       :scroll-into-view="scrollToId"
       scroll-with-animation
+      :style="{ paddingBottom: listPaddingBottom + 'px' }"
     >
       <view v-for="(msg, index) in messages" :key="index">
         <view v-if="shouldShowTime(index)" class="chat-time">
@@ -52,12 +53,14 @@
       <view id="scroll-bottom-anchor" class="scroll-bottom-anchor"></view>
     </scroll-view>
 
-    <view class="input-panel">
+    <view class="input-panel" :style="{ bottom: inputBottom + 'px' }">
       <input 
         class="chat-input" 
         placeholder="请输入业务问题..." 
         v-model="inputText"
+        :adjust-position="false"
         @confirm="onSend"
+        @focus="onInputFocus"
       />
       <view 
         :class="['send-btn', inputText.trim() ? '' : 'send-btn-disabled']"
@@ -95,7 +98,7 @@
 </template>
 
 <script setup>
-import { ref, watch, nextTick, onMounted } from 'vue'
+import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue'
 
 const messages = ref([
   {
@@ -112,13 +115,65 @@ const inputText = ref('')
 const loading = ref(false)
 const scrollToId = ref('')
 const pageHeight = ref(0)
+const keyboardHeight = ref(0)
+const tabbarHeight = ref(0) // 原生 tabbar 高度 + 底部安全区
 const showFileModal = ref(false)
 const currentFiles = ref([])
 
+// 输入栏底部偏移：键盘弹起时贴键盘顶部（需减去 tabbar 高度，因 .chat-page 底部在 tabbar 上方），否则贴页面底部
+const inputBottom = computed(() => {
+  if (keyboardHeight.value > 0) {
+    return Math.max(0, keyboardHeight.value - tabbarHeight.value)
+  }
+  return 0
+})
+
+// 聊天列表底部留白：键盘弹起时留键盘高度，否则留输入栏高度
+const listPaddingBottom = computed(() => {
+  return inputBottom.value + 76
+})
+
 onMounted(() => {
   const systemInfo = uni.getSystemInfoSync()
+  // App端使用 screenHeight（物理屏幕高度，不随键盘变化）
+  // H5端使用 windowHeight（不包含浏览器地址栏）
+  // #ifdef APP-PLUS
+  // 原生 tabbar 高度约 50px + 底部安全区
+  const safeBottom = systemInfo.safeAreaInsets?.bottom || 0
+  tabbarHeight.value = 50 + safeBottom
+  // 页面高度 = 屏幕高度 - tabbar 高度（只占 tabbar 上方区域，避免页面可滚动）
+  pageHeight.value = systemInfo.screenHeight - tabbarHeight.value
+  // #endif
+  // #ifndef APP-PLUS
   pageHeight.value = systemInfo.windowHeight
+  // H5 端 tabbar 是页面内渲染的，不需要额外偏移
+  tabbarHeight.value = 0
+  // #endif
+
+  // 监听键盘高度变化 - 仅用于控制输入栏 bottom 偏移，不改变列表高度
+  uni.onKeyboardHeightChange((res) => {
+    keyboardHeight.value = res.height
+    if (res.height > 0) {
+      nextTick(() => {
+        setTimeout(() => {
+          scrollToBottom()
+        }, 100)
+      })
+    }
+  })
 })
+
+onUnmounted(() => {
+  uni.offKeyboardHeightChange()
+})
+
+function onInputFocus() {
+  nextTick(() => {
+    setTimeout(() => {
+      scrollToBottom()
+    }, 100)
+  })
+}
 
 watch(messages, () => {
   nextTick(() => {
@@ -504,11 +559,13 @@ function markdownToHtml(text) {
 
 <style scoped>
 .chat-page {
+  position: relative;
   display: flex;
   flex-direction: column;
   padding-top: var(--status-bar-height);
   box-sizing: border-box;
   background-color: #F5F6F8;
+  overflow: hidden;
 }
 .navbar {
   height: 44px;
@@ -525,7 +582,7 @@ function markdownToHtml(text) {
 }
 .chat-list {
   flex: 1;
-  padding: 16px;
+  padding: 16px 16px 0 16px;
   overflow-y: auto;
   box-sizing: border-box;
 }
@@ -615,12 +672,18 @@ function markdownToHtml(text) {
   margin: 0 8px;
 }
 .input-panel {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
   display: flex;
   align-items: center;
   padding: 12px 16px;
+  padding-bottom: calc(12px + env(safe-area-inset-bottom));
   background-color: #ffffff;
   border-top: 1px solid #eeeeee;
   box-shadow: 0 -2px 8px rgba(0, 0, 0, 0.03);
+  z-index: 10;
 }
 .chat-input {
   flex: 1;
