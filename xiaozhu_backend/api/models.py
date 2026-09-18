@@ -296,6 +296,11 @@ class TodoItem(models.Model):
         default="",
         verbose_name="标题",
     )
+    detail = models.TextField(
+        default="",
+        blank=True,
+        verbose_name="详情",
+    )
     event_date = models.DateField(
         null=True,
         blank=True,

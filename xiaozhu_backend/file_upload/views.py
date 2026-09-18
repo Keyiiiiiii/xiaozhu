@@ -16,7 +16,7 @@ from channels.layers import get_channel_layer
 from asgiref.sync import async_to_sync
 from .minio_client import upload_file_to_minio, get_file_from_minio
 from .askApi import call_llm_api, parse_llm_response, API_URL, API_KEY
-from api.models import VisitRecord
+from api.models import VisitRecord, TodoItem
 from api.auth_utils import get_user_from_request
 
 AUDIO_CONTENT_TYPES = {
@@ -377,6 +377,87 @@ def summarize_record(request):
         return JsonResponse({
             "status": "error",
             "message": f"总结API响应格式错误: {str(e)}"
+        }, status=500)
+
+
+@csrf_exempt
+@require_POST
+def extract_todos(request):
+    user, auth_error = _auth_or_401(request)
+    if auth_error:
+        return auth_error
+
+    creator_id = user.id
+    record_id = int(request.POST.get("id", 0))
+
+    if not record_id:
+        return JsonResponse({
+            "status": "error",
+            "message": "id 不能为空。"
+        }, status=400)
+
+    try:
+        visit_record = VisitRecord.objects.get(id=record_id, creator_id=creator_id)
+    except VisitRecord.DoesNotExist:
+        return JsonResponse({
+            "status": "error",
+            "message": f"走访记录 ID={record_id}, creator_id={creator_id} 不存在"
+        }, status=400)
+
+    ai_summary = visit_record.ai_summary
+    if not ai_summary:
+        return JsonResponse({
+            "status": "error",
+            "message": "AI总结文本为空，无法提取待办事项"
+        }, status=400)
+
+    try:
+        response = call_llm_api(
+            settings.ToDo_API_URL,
+            settings.ToDo_API_KEY,
+            ai_summary,
+            str(creator_id),
+            False,
+        )
+
+        if isinstance(response, str):
+            return JsonResponse({
+                "status": "error",
+                "message": f"调用待办提取API失败: {response}"
+            }, status=500)
+
+        raw_text = response["data"]["data"]["outputs"]["text"]
+        parsed_data = parse_llm_response(raw_text)
+        todo_list = parsed_data.get("ToDoList", [])
+
+        # 将整个 ToDoList 以文本（JSON 字符串）形式存入 TodoItem.detail
+        detail_text = json.dumps(todo_list, ensure_ascii=False) if todo_list else ""
+
+        todo_item = TodoItem.objects.create(
+            owner=user,
+            visit_record=visit_record,
+            title="",
+            detail=detail_text,
+            is_ai_generated=True,
+            status="pending",
+        )
+
+        return JsonResponse({
+            "status": "success",
+            "message": "待办事项提取成功",
+            "todo_id": todo_item.id,
+            "detail": detail_text,
+            "record_id": record_id
+        })
+    except requests.exceptions.RequestException as e:
+        return JsonResponse({
+            "status": "error",
+            "message": f"调用待办提取API失败: {str(e)}"
+        }, status=500)
+    except KeyError as e:
+        return JsonResponse({
+            "status": "error",
+            "message": f"待办提取API响应格式错误: {str(e)}"
         }, status=500)
 
 
