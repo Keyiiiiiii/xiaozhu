@@ -5,6 +5,8 @@ Models definition for RongXiaoZhu backend service.
 
 from django.db import models
 from django.contrib.auth.models import AbstractUser
+from django.core.exceptions import ValidationError
+from django.utils import timezone
 
 
 # =====================================================================
@@ -65,8 +67,59 @@ class Role(models.Model):
 
 
 # =====================================================================
-# 2. User (用户表)
+# 2. Organization / User (组织与用户)
 # =====================================================================
+class Department(models.Model):
+    code = models.CharField(max_length=50, unique=True, verbose_name="部门编码")
+    name = models.CharField(max_length=100, verbose_name="部门名称")
+
+    class Meta:
+        verbose_name = "部门"
+        verbose_name_plural = verbose_name
+        ordering = ["code"]
+
+    def __str__(self):
+        return self.name
+
+
+class District(models.Model):
+    code = models.CharField(max_length=50, unique=True, verbose_name="区县编码")
+    name = models.CharField(max_length=100, verbose_name="区县名称")
+
+    class Meta:
+        verbose_name = "区县"
+        verbose_name_plural = verbose_name
+        ordering = ["code"]
+
+    def __str__(self):
+        return self.name
+
+
+class Grid(models.Model):
+    code = models.CharField(max_length=50, verbose_name="网格编码")
+    name = models.CharField(max_length=100, verbose_name="网格名称")
+    district = models.ForeignKey(
+        District,
+        on_delete=models.PROTECT,
+        related_name="grids",
+        verbose_name="所属区县",
+    )
+
+    class Meta:
+        verbose_name = "网格"
+        verbose_name_plural = verbose_name
+        ordering = ["district_id", "code"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["district", "code"],
+                name="uniq_grid_code_per_district",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.district.name} / {self.name}"
+
+
 class User(AbstractUser):
     """
     User model containing work ID, name, role, and organization text.
@@ -92,10 +145,53 @@ class User(AbstractUser):
         max_length=150, 
         verbose_name="所属机构"
     )
+    department = models.ForeignKey(
+        Department,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="users",
+        verbose_name="所属部门",
+    )
+    district = models.ForeignKey(
+        District,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="users",
+        verbose_name="所属区县",
+    )
+    grid = models.ForeignKey(
+        Grid,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="users",
+        verbose_name="所属网格",
+    )
 
     class Meta:
         verbose_name = "用户"
         verbose_name_plural = verbose_name
+
+    def clean(self):
+        super().clean()
+        errors = {}
+        role_code = self.role.code if self.role_id else None
+
+        if role_code == "district" and not self.district_id:
+            errors["district"] = "区县专项用户必须关联区县。"
+        if role_code == "frontline":
+            if not self.district_id:
+                errors["district"] = "一线用户必须关联区县。"
+            if not self.grid_id:
+                errors["grid"] = "一线用户必须关联网格。"
+        if self.grid_id and self.district_id:
+            if self.grid.district_id != self.district_id:
+                errors["grid"] = "用户所属网格必须位于用户所属区县。"
+
+        if errors:
+            raise ValidationError(errors)
 
 
 # =====================================================================
@@ -239,9 +335,19 @@ class Notification(models.Model):
     """
     Notification broadcast records categorized by levels and targets.
     """
+    LEVEL_CHOICES = [
+        ("normal", "普通"),
+        ("important", "重要"),
+        ("urgent", "紧急"),
+    ]
+    SCOPE_CHOICES = [
+        ("city", "全市"),
+        ("district", "区县"),
+        ("grid", "网格"),
+    ]
     STATUS_CHOICES = [
-        ("unread", "未读"),
-        ("read", "已读"),
+        ("published", "已发布"),
+        ("revoked", "已撤回"),
     ]
     title = models.CharField(
         max_length=250, 
@@ -250,36 +356,185 @@ class Notification(models.Model):
     content = models.TextField(
         verbose_name="内容"
     )
-    level = models.ForeignKey(
-        Role,
+    level = models.CharField(
+        max_length=20,
+        choices=LEVEL_CHOICES,
+        default="normal",
+        verbose_name="紧急程度",
+    )
+    scope = models.CharField(
+        max_length=20,
+        choices=SCOPE_CHOICES,
+        default="city",
+        verbose_name="下发范围",
+    )
+    target_district = models.ForeignKey(
+        District,
         on_delete=models.PROTECT,
         null=True,
         blank=True,
-        related_name="notifications",
-        verbose_name="发送层级",
+        related_name="targeted_notifications",
+        verbose_name="目标区县",
     )
-    sender = models.ForeignKey(
+    target_grid = models.ForeignKey(
+        Grid,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="targeted_notifications",
+        verbose_name="目标网格",
+    )
+    publisher = models.ForeignKey(
         User,
-        on_delete=models.CASCADE, 
+        on_delete=models.PROTECT,
+        related_name="published_notifications",
         verbose_name="发送人"
     )
-    status = models.CharField(
-        max_length=50, 
-        choices=STATUS_CHOICES,
-        default="unread",
-        verbose_name="状态"
+    force_display = models.BooleanField(default=False, verbose_name="是否强制开屏")
+    force_duration = models.PositiveSmallIntegerField(
+        default=0,
+        verbose_name="强制展示秒数",
     )
-
-    # [暂不启用] MVP阶段不包含审批流
-    # approval_id = models.CharField(max_length=150, blank=True, verbose_name="关联审批工单ID")
+    status = models.CharField(
+        max_length=20,
+        choices=STATUS_CHOICES,
+        default="published",
+        verbose_name="发布状态",
+    )
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="创建时间")
+    published_at = models.DateTimeField(default=timezone.now, verbose_name="发布时间")
+    expire_at = models.DateTimeField(null=True, blank=True, verbose_name="过期时间")
+    revoked_at = models.DateTimeField(null=True, blank=True, verbose_name="撤回时间")
 
     class Meta:
         verbose_name = "通知分发"
         verbose_name_plural = verbose_name
+        ordering = ["-published_at", "-id"]
+        indexes = [
+            models.Index(
+                fields=["status", "expire_at", "published_at"],
+                name="notif_status_exp_pub_idx",
+            ),
+        ]
+        constraints = [
+            models.CheckConstraint(
+                condition=(
+                    models.Q(
+                        scope="city",
+                        target_district__isnull=True,
+                        target_grid__isnull=True,
+                    )
+                    | models.Q(
+                        scope="district",
+                        target_district__isnull=False,
+                        target_grid__isnull=True,
+                    )
+                    | models.Q(
+                        scope="grid",
+                        target_district__isnull=False,
+                        target_grid__isnull=False,
+                    )
+                ),
+                name="notif_scope_targets_valid",
+            ),
+            models.CheckConstraint(
+                condition=(
+                    models.Q(level="normal", force_display=False, force_duration=0)
+                    | models.Q(level="important", force_display=True, force_duration=3)
+                    | models.Q(level="urgent", force_display=True, force_duration=10)
+                ),
+                name="notif_force_rule_valid",
+            ),
+            models.CheckConstraint(
+                condition=(
+                    models.Q(expire_at__isnull=True)
+                    | models.Q(expire_at__gt=models.F("published_at"))
+                ),
+                name="notif_expiry_after_publish",
+            ),
+            models.CheckConstraint(
+                condition=(
+                    models.Q(status="published", revoked_at__isnull=True)
+                    | models.Q(status="revoked", revoked_at__isnull=False)
+                ),
+                name="notif_status_timestamp_valid",
+            ),
+        ]
+
+    def clean(self):
+        super().clean()
+        errors = {}
+        if self.scope == "city":
+            if self.target_district_id or self.target_grid_id:
+                errors["scope"] = "全市通知不能指定目标区县或网格。"
+        elif self.scope == "district":
+            if not self.target_district_id or self.target_grid_id:
+                errors["scope"] = "区县通知必须且只能指定目标区县。"
+        elif self.scope == "grid":
+            if not self.target_district_id or not self.target_grid_id:
+                errors["scope"] = "网格通知必须指定目标区县和网格。"
+            elif self.target_grid.district_id != self.target_district_id:
+                errors["target_grid"] = "目标网格必须属于目标区县。"
+
+        force_rules = {
+            "normal": (False, 0),
+            "important": (True, 3),
+            "urgent": (True, 10),
+        }
+        expected = force_rules.get(self.level)
+        if expected and (self.force_display, self.force_duration) != expected:
+            errors["force_duration"] = "强制展示配置与通知级别不一致。"
+        if self.expire_at and self.published_at and self.expire_at <= self.published_at:
+            errors["expire_at"] = "过期时间必须晚于发布时间。"
+
+        if errors:
+            raise ValidationError(errors)
 
 
 # =====================================================================
-# 6. QuotaRule (通知额度规则表)
+# 6. NotificationReceiver (通知接收记录)
+# =====================================================================
+class NotificationReceiver(models.Model):
+    notification = models.ForeignKey(
+        Notification,
+        on_delete=models.CASCADE,
+        related_name="receivers",
+        verbose_name="通知",
+    )
+    user = models.ForeignKey(
+        User,
+        on_delete=models.PROTECT,
+        related_name="received_notifications",
+        verbose_name="接收人",
+    )
+    read_at = models.DateTimeField(null=True, blank=True, verbose_name="阅读时间")
+    force_ack_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        verbose_name="强制展示确认时间",
+    )
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="接收时间")
+
+    class Meta:
+        verbose_name = "通知接收记录"
+        verbose_name_plural = verbose_name
+        constraints = [
+            models.UniqueConstraint(
+                fields=["notification", "user"],
+                name="uniq_notification_receiver",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["user", "read_at"], name="recv_user_read_idx"),
+            models.Index(
+                fields=["user", "force_ack_at"],
+                name="recv_user_force_idx",
+            ),
+        ]
+
+
+# =====================================================================
+# 7. QuotaRule (通知额度规则表)
 # =====================================================================
 class QuotaRule(models.Model):
     """
@@ -303,7 +558,7 @@ class QuotaRule(models.Model):
 
 
 # =====================================================================
-# 7. AppVersion (应用版本表)
+# 8. AppVersion (应用版本表)
 # =====================================================================
 class AppVersion(models.Model):
     """
@@ -370,5 +625,8 @@ class AppVersion(models.Model):
         verbose_name_plural = verbose_name
         ordering = ["-version_code", "-created_at"]
         indexes = [
-            models.Index(fields=["platform", "is_active"]),
+            models.Index(
+                fields=["platform", "is_active"],
+                name="appver_platform_active_idx",
+            ),
         ]
