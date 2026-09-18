@@ -7,6 +7,7 @@
 	} from './package.json'
 	import loginApi from '@/api/login.js'
 	import { clearAuthStorage } from '@/api/request.js'
+	import { initPushClickListener } from '@/common/notification.js'
 	// #ifdef APP
 	import checkUpdate from '@/uni_modules/uni-upgrade-center-app/utils/check-update';
 	// #endif
@@ -20,6 +21,9 @@
 				'background:#007aff ;padding: 1px; border-radius: 0 3px 3px 0; color: #fff; font-weight: bold;'
 			)
 			// #endif
+
+			// 注册系统本地推送的点击监听（应用外通知点击后回到对应页面）
+			initPushClickListener();
 			// 线上示例使用
 			// console.log('%c uni-app官方团队诚邀优秀前 端工程师加盟，一起打造更卓越的uni-app & uniCloud，欢迎投递简历到 hr2013@dcloud.io', 'color: red');
 			console.log('App Launch');

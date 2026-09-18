@@ -9,24 +9,12 @@
       <view class="nav-placeholder"></view>
     </view>
 
-    <!-- 顶部筛选条：来源（市级/区县） -->
-    <view class="tab-header">
-      <view
-        v-for="opt in sourceFilters"
-        :key="opt.value"
-        class="tab-item"
-        :class="{ active: currentSource === opt.value }"
-        @click="switchSource(opt.value)"
-      >
-        <text class="tab-text">{{ opt.label }}</text>
-      </view>
-    </view>
     <!-- 第二行筛选条：紧急程度（全部/重要/紧急） -->
-    <view class="tab-header sub-tab-header">
+    <view class="tab-header">
       <view
         v-for="opt in urgencyFilters"
         :key="opt.value"
-        class="tab-item sub-tab-item"
+        class="tab-item"
         :class="{ active: currentUrgency === opt.value }"
         @click="switchUrgency(opt.value)"
       >
@@ -108,11 +96,6 @@ export default {
     return {
       currentSource: 'all',
       currentUrgency: 'all',
-      sourceFilters: [
-        { value: 'all', label: '全部' },
-        { value: 'city', label: '市级' },
-        { value: 'district', label: '区县' }
-      ],
       urgencyFilters: [
         { value: 'all', label: '全部' },
         { value: 'important', label: '重要' },
