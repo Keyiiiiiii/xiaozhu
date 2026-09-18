@@ -35,6 +35,12 @@ const config = {
     pendingForcePath: "/api/notifications/pending-force/",
     markDisplayedPath: "/api/notifications/", // 拼接 {id}/mark-displayed/
     publishPath: "/api/notifications/"
+  },
+  knowledgeServer: {
+    // 所有平台统一绝对地址
+    baseUrl: "http://101.33.219.170:20001/",
+    queryPath: "/api/knowledge",
+    downloadPath: "/api/knowledge/download/" // 拼接 {id}/
   }
 };
 

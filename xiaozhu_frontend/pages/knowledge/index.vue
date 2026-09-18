@@ -99,6 +99,8 @@
 
 <script setup>
 import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue'
+import config from '@/api/config.js'
+import { getKnowledgeQueryUrl, getKnowledgeDownloadUrl } from '@/api/knowledge.js'
 
 const messages = ref([
   {
@@ -252,7 +254,7 @@ function onSend() {
   const userId = userInfo.empId || String(userInfo.id || '');
 
   uni.request({
-    url: '/api/knowledge',
+    url: getKnowledgeQueryUrl(),
     method: 'POST',
     data: {
       ques: text,
@@ -347,7 +349,7 @@ function openFile(file) {
   
   // #ifdef H5
   // H5端：使用fetch下载并通过a标签实现正确文件名
-  fetch(`/api/knowledge/download/${file.id}/`)
+  fetch(getKnowledgeDownloadUrl(file.id))
     .then(response => response.blob())
     .then(blob => {
       const url = window.URL.createObjectURL(blob)
@@ -369,7 +371,7 @@ function openFile(file) {
   // #ifndef H5
   // 非H5端：使用uni.downloadFile
   uni.downloadFile({
-    url: `/api/knowledge/download/${file.id}/`,
+    url: getKnowledgeDownloadUrl(file.id),
     success: (res) => {
       if (res.statusCode === 200) {
         // #ifdef MP-WEIXIN
