@@ -27,6 +27,14 @@ const config = {
   versionServer: {
     baseUrl: "http://101.33.219.170:20001/",
     checkPath: "/api/version/check/"
+  },
+  notificationServer: {
+    baseUrl: "http://101.33.219.170:20001/",
+    listPath: "/api/notifications/",
+    detailPath: "/api/notifications/", // 拼接 {id}/
+    pendingForcePath: "/api/notifications/pending-force/",
+    markDisplayedPath: "/api/notifications/", // 拼接 {id}/mark-displayed/
+    publishPath: "/api/notifications/"
   }
 };
 

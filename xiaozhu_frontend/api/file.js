@@ -38,13 +38,25 @@ function uploadFileH5(url, file, formData) {
   });
 }
 
+function stringifyFormData(formData) {
+  const result = {};
+  if (!formData) {
+    return result;
+  }
+  Object.keys(formData).forEach((key) => {
+    const value = formData[key];
+    result[key] = value === undefined || value === null ? "" : String(value);
+  });
+  return result;
+}
+
 function uploadFileUni(url, filePath, formData) {
   return new Promise((resolve, reject) => {
     uni.uploadFile({
       url: url,
       filePath: filePath,
       name: 'file',
-      formData: formData || {},
+      formData: stringifyFormData(formData),
       header: getAuthHeader(),
       success: (res) => {
         try {

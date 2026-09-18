@@ -21,7 +21,6 @@ db.sqlite3-journal
 media/
 staticfiles/
 static/
-migrations/
 
 # ==================== Node.js / UniApp ====================
 node_modules/

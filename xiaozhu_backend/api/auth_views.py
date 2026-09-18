@@ -11,11 +11,13 @@ from api.auth_utils import get_user_from_request
 
 
 def serialize_user(user):
+    role = user.role
     return {
         "id": user.id,
         "username": user.username,
         "name": user.name,
-        "role": user.role_id,
+        "role": role.name if role else "",
+        "roleCode": role.code if role else "",
         "dept": user.organization,
         "empId": user.work_id,
     }

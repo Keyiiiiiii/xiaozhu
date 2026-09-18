@@ -17,7 +17,7 @@ def get_user_from_request(request):
         validated = jwt_auth.get_validated_token(token)
         user = jwt_auth.get_user(validated)
         if isinstance(user, User):
-            return user
+            return User.objects.select_related("role").filter(pk=user.pk).first()
     except Exception:
         return None
     return None

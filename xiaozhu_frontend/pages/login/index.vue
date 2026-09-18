@@ -108,6 +108,10 @@ export default {
           this.setUserInfo(res.userInfo);
           this.login('password');
           this.goToHome();
+          // 登录成功后触发开屏强制通知检查（等首页挂载后由全局事件触发）
+          setTimeout(() => {
+            uni.$emit('app:check-force-notification');
+          }, 600);
         })
         .catch((err) => {
           this.errorMsg = err.message || '登录失败，请重试';

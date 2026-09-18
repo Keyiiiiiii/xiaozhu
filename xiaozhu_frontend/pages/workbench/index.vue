@@ -60,39 +60,81 @@
     <!-- 通知公告 (增强层次感) -->
     <view class="section">
       <view class="section-head">
-        <text class="section-title">重要通知</text>
-        <text class="section-more">全部 ></text>
+        <view class="section-title-wrap">
+          <text class="section-title">重要通知</text>
+          <view class="unread-badge" v-if="unreadCount > 0">
+            <text class="unread-badge-text">{{ unreadCount > 99 ? '99+' : unreadCount }}</text>
+          </view>
+        </view>
+        <text class="section-more" @click="goToNotificationList">全部 ></text>
       </view>
-      <view class="notice-list">
-        <view class="notice-item">
-          <view class="notice-tag urgent">紧急</view>
-          <view class="notice-content">关于下发2026年6月政企宽带最新营销方案的通知</view>
-          <view class="notice-time">06-01</view>
+      <view class="notice-list" v-if="noticeList.length > 0">
+        <view
+          class="notice-item"
+          :class="{ 'notice-unread': !item.is_read }"
+          v-for="item in noticeList"
+          :key="item.id"
+          @click="goToNotificationDetail(item.id)"
+        >
+          <view class="notice-dot" v-if="!item.is_read"></view>
+          <view class="notice-tag" :class="getUrgencyClass(item)">{{ getUrgencyText(item) }}</view>
+          <view class="notice-content">{{ item.title }}</view>
+          <view class="notice-time">{{ formatNoticeTime(item.publish_time || item.created_at) }}</view>
         </view>
-        <view class="notice-item">
-          <view class="notice-tag normal">市级</view>
-          <view class="notice-content">关于规范走访录音上传要求的说明</view>
-          <view class="notice-time">05-28</view>
-        </view>
+      </view>
+      <view class="notice-empty" v-else>
+        <text class="notice-empty-text">暂无通知</text>
+      </view>
+      <view class="notice-publish-entry" v-if="canPublish" @click="goToPublish">
+        <text class="publish-entry-text">+ 下发通知</text>
       </view>
     </view>
+
+    <!-- 开屏强制通知弹窗 -->
+    <force-notification></force-notification>
   </view>
 </template>
 
 <script>
 import { mapState } from 'vuex';
+import notificationApi from '@/api/notification.js';
+import ForceNotification from '@/components/force-notification/force-notification.vue';
 
 export default {
+  components: { ForceNotification },
   data() {
-    return {};
+    return {
+      noticeList: [],
+      unreadCount: 0
+    };
   },
   computed: {
     ...mapState(['userInfo']),
     userName() {
       return this.userInfo ? this.userInfo.name : '用户';
+    },
+    canPublish() {
+      const role = this.userInfo && this.userInfo.role;
+      return role === 'city' || role === 'district';
     }
   },
+  onShow() {
+    this.fetchNoticeList();
+    this.fetchUnreadCount();
+  },
+  mounted() {
+    // 监听详情页标记已读事件，实时刷新未读数
+    uni.$on('notification:read-updated', this.handleReadUpdated);
+  },
+  beforeDestroy() {
+    uni.$off('notification:read-updated', this.handleReadUpdated);
+  },
   methods: {
+    handleReadUpdated() {
+      // 已读状态变化后，刷新未读数与列表
+      this.fetchUnreadCount();
+      this.fetchNoticeList();
+    },
     goToVisit() {
       uni.switchTab({
         url: '/pages/visit/index'
@@ -107,6 +149,59 @@ export default {
       uni.switchTab({
         url: '/pages/todo/index'
       });
+    },
+    goToNotificationList() {
+      uni.navigateTo({
+        url: '/pages/notification/list'
+      });
+    },
+    goToNotificationDetail(id) {
+      uni.navigateTo({
+        url: `/pages/notification/detail?id=${id}`
+      });
+    },
+    goToPublish() {
+      uni.navigateTo({
+        url: '/pages/notification/publish'
+      });
+    },
+    fetchNoticeList() {
+      notificationApi.getList({ page: 1, page_size: 5 })
+        .then((res) => {
+          this.noticeList = res.results || [];
+        })
+        .catch((err) => {
+          console.warn('[workbench] 加载通知失败:', err && err.message);
+          this.noticeList = [];
+        });
+    },
+    fetchUnreadCount() {
+      notificationApi.getUnreadCount()
+        .then((res) => {
+          this.unreadCount = (res && typeof res.count === 'number') ? res.count : 0;
+        })
+        .catch((err) => {
+          console.warn('[workbench] 获取未读数失败:', err && err.message);
+        });
+    },
+    getUrgencyText(item) {
+      const u = item.urgency || item.tag || item.level;
+      if (u === 'urgent' || u === '紧急') return '紧急';
+      if (u === 'important' || u === '重要') return '重要';
+      return '通知';
+    },
+    getUrgencyClass(item) {
+      const u = item.urgency || item.tag || item.level;
+      if (u === 'urgent' || u === '紧急') return 'urgent';
+      if (u === 'important' || u === '重要') return 'important';
+      return 'normal';
+    },
+    formatNoticeTime(timeStr) {
+      if (!timeStr) return '';
+      const d = new Date(String(timeStr).replace(' ', 'T'));
+      if (isNaN(d.getTime())) return String(timeStr).slice(5, 10) || '';
+      const pad = (n) => (n < 10 ? '0' + n : '' + n);
+      return `${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
     }
   }
 };
@@ -230,6 +325,26 @@ export default {
   font-size: 13px;
   color: #999999;
 }
+.section-title-wrap {
+  display: flex;
+  align-items: center;
+}
+.unread-badge {
+  min-width: 18px;
+  height: 18px;
+  padding: 0 6px;
+  margin-left: 8px;
+  border-radius: 9px;
+  background-color: #F5222D;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+.unread-badge-text {
+  font-size: 11px;
+  color: #FFFFFF;
+  line-height: 1;
+}
 
 /* 快捷操作优化 */
 .grid-panel {
@@ -275,10 +390,38 @@ export default {
   align-items: flex-start;
   padding: 16px 0;
   border-bottom: 1px solid #F5F5F5;
+  position: relative;
 }
 .notice-item:last-child {
   border-bottom: none;
   padding-bottom: 0;
+}
+/* 未读：左侧粗条提示 + 略深背景 */
+.notice-item.notice-unread {
+  background-color: #FAFCFE;
+  margin: 0 -8px;
+  padding-left: 8px;
+  padding-right: 8px;
+  border-radius: 4px;
+}
+.notice-item.notice-unread::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 16px;
+  bottom: 16px;
+  width: 3px;
+  background-color: #0085D0;
+  border-radius: 2px;
+}
+.notice-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background-color: #F5222D;
+  margin-right: 6px;
+  margin-top: 8px;
+  flex-shrink: 0;
 }
 .notice-tag {
   font-size: 11px;
@@ -292,9 +435,17 @@ export default {
   background-color: #FFF1F0;
   color: #F5222D;
 }
+.important {
+  background-color: #E6F4FF;
+  color: #0085D0;
+}
 .normal {
   background-color: #F0F5FF;
   color: #0085D0;
+}
+.city-level {
+  background-color: #FFF7E6;
+  color: #FA8C16;
 }
 .notice-content {
   flex: 1;
@@ -308,5 +459,24 @@ export default {
   color: #AAAAAA;
   white-space: nowrap;
   margin-top: 2px;
+}
+.notice-empty {
+  padding: 24px 0;
+  text-align: center;
+}
+.notice-empty-text {
+  font-size: 13px;
+  color: #AAAAAA;
+}
+.notice-publish-entry {
+  margin-top: 16px;
+  padding: 10px 0;
+  text-align: center;
+  border-top: 1px dashed #EEEEEE;
+}
+.publish-entry-text {
+  font-size: 14px;
+  color: #0085D0;
+  font-weight: 500;
 }
 </style>
