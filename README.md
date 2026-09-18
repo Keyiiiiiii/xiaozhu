@@ -32,6 +32,8 @@ xiaozhu/
 
 ### 1. 激活 Python 虚拟环境
 
+项目部署环境已准备 Python 虚拟环境，进入项目根目录后按操作系统激活：
+
 ```bash
 # Windows PowerShell
 .\venv\Scripts\Activate.ps1
@@ -86,19 +88,24 @@ DB_PORT=3306
 
 ### 5. 初始化数据库
 
-在 `xiaozhu_backend` 目录执行：
+进入包含 `manage.py` 的外层 `xiaozhu_backend` 目录执行：
 
 ```bash
+cd xiaozhu_backend
 python manage.py migrate
 python manage.py seed_test_users
 ```
 
-当模型发生变更时，应先生成并审查迁移，再执行迁移：
+`python manage.py migrate` 会一次性执行所有已注册应用的迁移，包括 `api`、`knowledge` 和 Django 内置应用；不需要进入 `knowledge` 目录再次执行。
+
+开发阶段修改模型后，应在开发环境生成并审查迁移：
 
 ```bash
 python manage.py makemigrations
 python manage.py migrate
 ```
+
+服务器部署时只执行仓库中已经提交的迁移，不要在服务器上运行 `makemigrations`。
 
 应用版本接口需要测试数据时，可执行：
 
@@ -106,7 +113,13 @@ python manage.py migrate
 python manage.py seed_app_versions
 ```
 
-> 当前仓库存在尚未补齐的数据库迁移。全新数据库在执行上述命令前，请先阅读[数据库已知问题](#数据库已知问题)。
+执行完成后可检查迁移状态：
+
+```bash
+python manage.py showmigrations api knowledge
+```
+
+正常情况下，`api` 的 `0001` 至 `0006` 以及 `knowledge` 的 `0001` 均应显示为 `[X]`。全新数据库会同时创建业务表和 `knowledge_knowledgefile`，无需手工创建知识库表。
 
 ## 启动后端
 
@@ -138,9 +151,9 @@ python manage.py createsuperuser
 
 | 登录工号 / 用户名 | 密码 | 姓名 | 角色 | 组织 |
 | --- | --- | --- | --- | --- |
-| `admin` | `123456` | 张三 | 一线人员（`frontline`） | 市公司 / 政企客户部 / 第一网格 |
-| `FZ10086` | `123456` | 李四 | 区县专项（`district`） | 市公司 / 鼓楼区 / 第二网格 |
-| `FZ10000` | `123456` | 王五 | 市公司（`city`） | 市公司 |
+| `admin` | `123456` | 张三 | 一线人员（`frontline`） | 市公司 / 测试区县 / 第一网格 |
+| `FZ10086` | `123456` | 李四 | 区县专项（`district`） | 市公司 / 鼓楼区 |
+| `FZ10000` | `123456` | 王五 | 市公司（`city`） | 市公司 / 市公司本部 |
 
 登录接口的 `username` 字段可以填写工号；种子数据中的用户名与工号相同。
 
@@ -150,7 +163,7 @@ python manage.py createsuperuser
 | --- | --- | --- | --- |
 | 一线人员（`frontline`） | 是 | 否 | 否 |
 | 区县专项（`district`） | 是 | 是 | 否 |
-| 市公司（`city`） | 否 | 是 | 是 |
+| 市公司（`city`） | 是 | 是 | 是 |
 
 `seed_test_users` 使用 `update_or_create`，可重复执行。每次执行都会同步角色、权限和上述用户资料，并将三个账号的密码重新设置为 `123456`。
 
@@ -162,9 +175,12 @@ python manage.py createsuperuser
 
 - `Permission`：功能级权限点；`code` 唯一。
 - `Role`：业务角色；`code` 唯一，通过多对多关系关联 `Permission`，并按 `level` 排序。
-- `User`：继承 Django `AbstractUser`；`work_id` 唯一，通过外键关联 `Role`，并保存姓名和组织信息。
+- `Department`：市公司部门，`code` 唯一；当前仅用于人员归属和发布者展示。
+- `District`：区县，`code` 唯一。
+- `Grid`：网格，同一区县内 `code` 唯一，并通过外键关联 `District`。
+- `User`：继承 Django `AbstractUser`；`work_id` 唯一，通过外键关联 `Role`、`Department`、`District` 和 `Grid`，并保留 `organization` 文本用于兼容展示。
 
-角色被用户、通知或额度规则引用时使用 `PROTECT`，避免误删角色导致授权及业务数据失去含义。用户的角色允许为空，便于数据迁移或暂未分配角色的场景。
+角色和组织外键使用 `PROTECT`，避免删除仍被用户或业务数据引用的角色、部门、区县和网格。区县角色必须关联区县；一线角色必须关联区县和网格，且网格必须属于用户选择的区县。
 
 ### 走访与待办
 
@@ -175,10 +191,11 @@ python manage.py createsuperuser
 
 ### 通知与额度
 
-- `Notification`：保存通知标题、内容、发送层级、发送人和读状态。
+- `Notification`：保存标题、正文、紧急程度、发布范围、目标区县或网格、发布者、强制展示配置、发布时间、过期时间和撤回状态。
+- `NotificationReceiver`：保存通知与用户的接收快照，以及每个用户独立的已读时间和强制展示确认时间。
 - `QuotaRule`：为每个角色配置一条月度推送额度，通过一对一关系保证同一角色最多一条规则。
 
-删除通知发送人时通知会通过 `CASCADE` 删除；被通知或额度规则引用的角色受 `PROTECT` 保护。
+通知发布者使用 `PROTECT`，避免删除账号后丢失发布审计；删除通知时通过 `CASCADE` 删除对应接收快照，接收人用户使用 `PROTECT`。通知范围支持市公司、区县和网格，发布时按有效用户、组织外键及 `notify.receive` 权限生成接收人快照。
 
 ### 应用版本
 
@@ -195,23 +212,27 @@ python manage.py createsuperuser
 ```text
 Permission  * <──> *  Role
 Role        1 <──  *  User
-Role        1 <──  *  Notification
 Role        1 <──  0..1 QuotaRule
+Department  1 <──  *  User（可选关联）
+District    1 <──  *  Grid
+District    1 <──  *  User（可选关联）
+Grid        1 <──  *  User（可选关联）
 User        1 <──  *  VisitRecord
 User        1 <──  *  TodoItem
-User        1 <──  *  Notification
+User        1 <──  *  Notification（作为发布者）
+Notification 1 <── * NotificationReceiver
+User          1 <── * NotificationReceiver
 VisitRecord 1 <──  *  TodoItem（可选关联）
 ```
 
-## 数据库已知问题
+## 数据库迁移说明
 
-当前模型定义与仓库中的迁移文件并未完全同步：
+- `api/0004_sync_appversion_schema` 将旧版 `AppVersion` 结构升级为当前字段和索引。
+- `api/0005_organization_models` 创建部门、区县和网格表，并为用户增加组织外键。
+- `api/0006_notification_delivery_models` 升级通知结构并创建通知接收人表。
+- `knowledge/0001_initial` 创建 `knowledge_knowledgefile`；如果旧环境已手工创建同名表，迁移会保留现有表并登记迁移状态。
 
-1. **`AppVersion` 迁移缺失**：现有初始迁移仍使用旧字段 `is_forced`，而当前模型已经改为 `version_code`、`update_type`、`is_silent`、`is_active`、`created_at`，并增加了平台/启用状态索引。仓库中尚无迁移完成这些变更。
-2. **`KnowledgeFile` 迁移缺失**：`knowledge` 应用存在 `KnowledgeFile` 模型，但其 `migrations` 目录当前没有初始迁移，因此全新数据库执行 `migrate` 不会创建对应数据表。
-3. **影响范围**：迁移补齐前，全新环境中的版本检查、`seed_app_versions` 和知识库文件功能可能因字段或数据表不存在而失败。认证、角色和走访等已存在迁移的功能不代表上述功能也已可用。
-
-在修复这些问题时，应生成并审查新的迁移文件，避免直接手工修改生产数据库或改写已在其他环境执行过的历史迁移。
+全新部署应创建空数据库后直接运行 `python manage.py migrate`，不要先手工创建业务表，也不要导入包含旧版业务表结构的全量 SQL。需要恢复知识库记录时，应先由迁移创建最新表结构，再仅导入与当前 `KnowledgeFile` 字段匹配的数据。
 
 ## 测试
 
@@ -222,7 +243,7 @@ cd xiaozhu_backend
 python manage.py test api.tests.test_auth
 ```
 
-版本更新测试依赖正确的 `AppVersion` 表结构；在补齐迁移之前不应将其失败简单归因于接口代码。
+版本更新测试依赖已执行到 `api/0004` 及以上的 `AppVersion` 表结构。
 
 更完整的手工验收清单见 [`docs/榕小助_前端联调交接说明.md`](docs/榕小助_前端联调交接说明.md)。
 
@@ -235,5 +256,5 @@ python manage.py test api.tests.test_auth
 | 上传或 MinIO 报错 | 确认 MinIO 已启动、连接配置正确且目标 bucket 已创建。 |
 | 转写 WebSocket 无法连接 | 使用 `daphne` 启动后端，并确认 Redis 和 ASR 服务可用。 |
 | 真机无法连接后端 | 将前端服务地址改为后端电脑的局域网 IP，并确保手机与电脑处于同一网络。 |
-| 版本或知识库接口提示表/字段不存在 | 对照[数据库已知问题](#数据库已知问题)，确认所需迁移是否已经补齐并执行。 |
+| 版本或知识库接口提示表/字段不存在 | 执行 `python manage.py showmigrations api knowledge`，确认 `api/0001` 至 `0006` 和 `knowledge/0001` 均已执行。 |
 
