@@ -18,16 +18,30 @@
         
         <view :class="['msg-row', msg.role === 'ai' ? 'ai-row' : 'user-row']">
           <view v-if="msg.role === 'ai'" class="avatar ai-avatar">助</view>
-          <view :class="['msg-box', msg.role === 'ai' ? 'ai-msg' : 'user-msg']">
-            <rich-text 
-              v-if="msg.role === 'ai'" 
-              class="msg-text" 
-              :nodes="msg.htmlContent || msg.content"
-            ></rich-text>
+          <view
+            :class="['msg-box', msg.role === 'ai' ? 'ai-msg' : 'user-msg']"
+            @longpress="msg.role === 'user' ? onCopyMessage(msg) : null"
+          >
+            <!-- #ifdef H5 -->
+            <view
+              v-if="msg.role === 'ai'"
+              class="msg-text msg-text-html"
+              v-html="msg.htmlContent || msg.content"
+            ></view>
+            <!-- #endif -->
+            <!-- #ifndef H5 -->
+            <mp-html
+              v-if="msg.role === 'ai'"
+              class="msg-text"
+              :content="msg.htmlContent || msg.content"
+              :selectable="true"
+              :show-img-menu="false"
+            />
+            <!-- #endif -->
             <text v-else class="msg-text">{{ msg.content }}</text>
             <view v-if="msg.role === 'ai' && msg.showActions" class="msg-actions">
-              <text 
-                class="action-link" 
+              <text
+                class="action-link"
                 :class="{ 'action-link-disabled': !msg.file_records || msg.file_records.length === 0 }"
                 @click="showSourceFiles(msg)"
               >查看源文件</text>
@@ -54,10 +68,11 @@
     </scroll-view>
 
     <view class="input-panel" :style="{ bottom: inputBottom + 'px' }">
-      <input 
-        class="chat-input" 
-        placeholder="请输入业务问题..." 
+      <input
+        class="chat-input"
+        placeholder="请输入业务问题..."
         v-model="inputText"
+        :maxlength="-1"
         :adjust-position="false"
         @confirm="onSend"
         @focus="onInputFocus"
@@ -342,6 +357,30 @@ function showSourceFiles(msg) {
 function closeFileModal() {
   showFileModal.value = false
   currentFiles.value = []
+}
+
+function onCopyMessage(msg) {
+  let text = msg.content || ''
+  if (!text && msg.htmlContent) {
+    text = msg.htmlContent
+      .replace(/<[^>]+>/g, '')
+      .replace(/&nbsp;/g, ' ')
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/&amp;/g, '&')
+      .replace(/\s+\n/g, '\n')
+      .trim()
+  }
+  if (!text) {
+    uni.showToast({ title: '内容为空', icon: 'none' })
+    return
+  }
+  uni.setClipboardData({
+    data: text,
+    success: () => {
+      uni.showToast({ title: '已复制', icon: 'success' })
+    }
+  })
 }
 
 function openFile(file) {
@@ -650,6 +689,13 @@ function markdownToHtml(text) {
 .msg-text {
   font-size: 15px;
   line-height: 1.6;
+}
+/* H5 端 v-html 渲染的内容允许文本选中复制 */
+.msg-text-html {
+  user-select: text;
+  -webkit-user-select: text;
+  -moz-user-select: text;
+  word-break: break-word;
 }
 .ai-msg .msg-text {
   color: #333333;
